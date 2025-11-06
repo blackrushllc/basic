@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="EMPTY_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/basilc/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/basilc/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/basilcore/ast/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/basilcore/bytecode/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/basilcore/common/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/basilcore/compiler/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/basilcore/lexer/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/basilcore/parser/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/basilcore/vm/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/basilcore/vm/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
+      <excludeFolder url="file://$MODULE_DIR$/target" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>

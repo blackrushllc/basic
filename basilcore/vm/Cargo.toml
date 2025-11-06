@@ -1,0 +1,41 @@
+[package]
+name = "basil-vm"
+version = "0.0.1"
+edition = "2021"
+
+
+[dependencies]
+basil-common = { workspace = true }
+basil-bytecode = { workspace = true }
+basil-parser = { workspace = true }
+basil-compiler = { workspace = true }
+crossterm = "0.27"
+
+[features]
+# Declare all feature flags referenced by cfg in the code so rustc check-cfg recognizes them.
+obj-base64 = []
+obj-zip = []
+obj-curl = []
+obj-json = []
+obj-csv = []
+obj-sqlite = []
+obj-sql = []
+obj-sql-mysql = []
+obj-sql-postgres = []
+obj-bmx = []
+obj-bmx-rider = []
+obj-bmx-team = []
+obj-audio = []
+obj-midi = []
+obj-daw = []
+obj-ai = []
+obj-term = []
+obj-aws-s3 = []
+obj-aws-ses = []
+obj-aws-sqs = []
+obj-net-http = []
+obj-net-smtp = []
+obj-net-sftp = []
+obj-orm = []
+obj-orm-mysql = []
+obj-orm-postgres = []

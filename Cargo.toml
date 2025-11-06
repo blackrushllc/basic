@@ -1,0 +1,25 @@
+[workspace]
+members = [
+    "basilc",
+    "basilcore/common",
+    "basilcore/lexer",
+    "basilcore/ast",
+    "basilcore/parser",
+    "basilcore/bytecode",
+    "basilcore/compiler",
+    "basilcore/vm",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.0.1"
+
+[workspace.dependencies]
+basil-ast       = { path = "basilcore/ast" }
+basil-lexer     = { path = "basilcore/lexer" }
+basil-parser    = { path = "basilcore/parser" }
+basil-compiler  = { path = "basilcore/compiler" }
+basil-vm        = { path = "basilcore/vm" }
+basil-common    = { path = "basilcore/common" }
+basil-bytecode  = { path = "basilcore/bytecode" }
