@@ -152,7 +152,6 @@ fn print_help() {
     println!("Examples:");
     println!("  basic run examples/hello.bas");
     println!("  basic lex examples/hello.bas");
-    println!("  basic test testprogs/bigtest.bas");
     println!("  basic --analyze examples/hello.bas --json");
     println!("  basic --debug examples/hello.bas");
     println!("");
