@@ -52,14 +52,32 @@ pub fn compile(ast: &Program) -> Result<BCProgram> {
     let mut c = C::new();
     // Pre-scan to collect all routine names (FUNC/SUB) with arity and kind so calls can be resolved before definitions
     for s in ast {
-        if let Stmt::Func { kind, name, params, .. } = s {
-            let uname = name.to_ascii_uppercase();
-            c.fn_names.insert(uname.clone());
-            c.routines.insert(uname, RoutineInfo { arity: params.len(), is_sub: matches!(kind, basil_ast::FuncKind::Sub) });
+        match s {
+            Stmt::Func { kind, name, params, .. } => {
+                let uname = name.to_ascii_uppercase();
+                c.fn_names.insert(uname.clone());
+                c.routines.insert(uname, RoutineInfo { arity: params.len(), is_sub: matches!(kind, basil_ast::FuncKind::Sub) });
+            }
+            Stmt::Declare { kind, name, params } => {
+                let uname = name.to_ascii_uppercase();
+                c.fn_names.insert(uname.clone());
+                c.routines.insert(uname, RoutineInfo { arity: params.len(), is_sub: matches!(kind, basil_ast::FuncKind::Sub) });
+            }
+            _ => {}
         }
     }
+    // Two-phase top-level emission to honor forward calls via DECLARE:
+    // 1) Emit all function definitions first so their globals are initialized.
     for s in ast {
-        c.emit_stmt_toplevel(s)?;
+        if matches!(s, Stmt::Func { .. }) {
+            c.emit_stmt_toplevel(s)?;
+        }
+    }
+    // 2) Emit the rest of the top-level statements (non-function forms)
+    for s in ast {
+        if !matches!(s, Stmt::Func { .. }) {
+            c.emit_stmt_toplevel(s)?;
+        }
     }
     // Resolve top-level GOTO fixups now that all labels are known
     for (op_pos, u16_pos, label) in std::mem::take(&mut c.tl_goto_fixups) {
@@ -198,6 +216,8 @@ impl C {
 
     fn emit_stmt_toplevel(&mut self, s: &Stmt) -> Result<()> {
         match s {
+            // No code emission for forward declarations
+            Stmt::Declare { .. } => { /* ignore at codegen */ }
             // Compile function to a Function value and store into a global.
             Stmt::Func { name, params, body, .. } => {
                 // remember function name for call vs array indexing disambiguation
@@ -903,6 +923,7 @@ impl C {
 
     fn emit_stmt_func(&mut self, chunk: &mut Chunk, s: &Stmt, env: &mut LocalEnv) -> Result<()> {
         match s {
+            Stmt::Declare { .. } => { /* no-op inside bodies */ },
             Stmt::Let { name, indices, init } => {
                 match indices {
                     None => {
@@ -1790,6 +1811,23 @@ impl C {
                         "URLDECODE$" => Some(23u8),
                         "STRING$" => Some(26u8),
                         "SLEEP" => Some(24u8),
+                        // --- Math builtins ---
+                        "ABS" => Some(70u8),
+                        "ATN" => Some(71u8),
+                        "COS" => Some(72u8),
+                        "EXP" => Some(73u8),
+                        "INT" => Some(74u8),
+                        "LOG" => Some(75u8),
+                        "RND" => Some(76u8),
+                        "SIN" => Some(77u8),
+                        "SQR" => Some(78u8),
+                        "TAN" => Some(79u8),
+                        // --- Print helpers and formatting ---
+                        "SPC" => Some(80u8),
+                        "TAB" => Some(81u8),
+                        "AT"  => Some(81u8), // alias of TAB
+                        "USING$" => Some(82u8),
+                        // --- File I/O builtins ---
                         "FOPEN" => Some(40u8),
                         "FCLOSE" => Some(41u8),
                         "FFLUSH" => Some(42u8),
@@ -2205,6 +2243,7 @@ impl C {
 
     fn emit_stmt_tl_in_chunk(&mut self, chunk: &mut Chunk, s: &Stmt) -> Result<()> {
         match s {
+            Stmt::Declare { .. } => { /* no-op */ },
             Stmt::Let { name, indices, init } => {
                 match indices {
                     None => {

@@ -353,6 +353,25 @@ impl Parser {
             return Ok(Stmt::Try { try_body, catch_var, catch_body, finally_body });
         }
 
+        // DECLARE SUB/FUNCTION name(params)
+        if self.match_k(TokenKind::Declare) {
+            if !self.check(TokenKind::Func) { return Err(BasilError("Expected SUB or FUNCTION after DECLARE".into())); }
+            let kw = self.next().unwrap();
+            let kind = if kw.lexeme.eq_ignore_ascii_case("SUB") { basil_ast::FuncKind::Sub } else { basil_ast::FuncKind::Func };
+            let name = self.expect_ident()?;
+            self.expect(TokenKind::LParen)?;
+            let mut params = Vec::new();
+            if !self.check(TokenKind::RParen) {
+                loop {
+                    params.push(self.expect_ident()?);
+                    if !self.match_k(TokenKind::Comma) { break; }
+                }
+            }
+            self.expect(TokenKind::RParen)?;
+            self.terminate_stmt()?;
+            return Ok(Stmt::Declare { kind, name, params });
+        }
+
         // FUNC/SUB name(params) block
         if self.check(TokenKind::Func) {
             let kw = self.next().unwrap();

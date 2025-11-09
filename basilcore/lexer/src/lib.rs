@@ -77,6 +77,8 @@ pub enum TokenKind {
     Label, Goto, Gosub,
     // Dynamic code execution
     Exec, Eval,
+    // Declarations
+    Declare,
     Eof,
 }
 
@@ -541,6 +543,7 @@ impl<'a> Lexer<'a> {
             "FUNC"   => TokenKind::Func,
             "FUNCTION" => TokenKind::Func,
             "SUB"    => TokenKind::Func,
+            "DECLARE" => TokenKind::Declare,
             "RETURN" => TokenKind::Return,
             "IF"     => TokenKind::If,
             "THEN"   => TokenKind::Then,

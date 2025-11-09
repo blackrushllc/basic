@@ -121,6 +121,8 @@ pub enum Stmt {
     Continue,
     Block(Vec<Stmt>),
     Func { kind: FuncKind, name: String, params: Vec<String>, body: Vec<Stmt> },
+    // Forward declaration: DECLARE SUB/FUNCTION name(params)
+    Declare { kind: FuncKind, name: String, params: Vec<String> },
     For { var: String, start: Expr, end: Expr, step: Option<Expr>, body: Box<Stmt> },
     // FOR EACH var IN expr ... NEXT
     ForEach { var: String, enumerable: Expr, body: Box<Stmt> },

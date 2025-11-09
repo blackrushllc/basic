@@ -268,6 +268,10 @@ pub struct VM {
     current_exception: Option<String>,
     // Struct type descriptor registry
     struct_types: HashMap<String, VMTypeDesc>,
+    // Output column tracking for TAB/AT/SPC helpers
+    out_col: usize,
+    // Pseudo-random generator state for RND
+    rng_state: u64,
 }
 
 // --- Lightweight Class Instance object ---
@@ -412,6 +416,16 @@ impl VM {
             _handlers: Vec::new(),
             current_exception: None,
             struct_types: HashMap::new(),
+            out_col: 0,
+            rng_state: {
+                // Seed with time-based value xor constant; fallback to a nonzero constant
+                let nanos = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or(0x1234_5678_9ABC_DEF0);
+                let seed = nanos ^ 0x9E37_79B9_7F4A_7C15u64;
+                if seed == 0 { 0xA5A5_5A5A_DEAD_BEEFu64 } else { seed }
+            },
         };
         #[cfg(feature = "obj-ai")]
         {
@@ -952,7 +966,24 @@ impl VM {
                     if self.frames.is_empty() { break; }
                 }
 
-                Op::Print => { let v = self.pop()?; if let Some(dbg) = &self.debugger { dbg.emit(debug::DebugEvent::Output(format!("{}", v))); } print!("{}", v); let _ = io::stdout().flush(); }
+                Op::Print => {
+                    let v = self.pop()?;
+                    let s = format!("{}", v);
+                    if let Some(dbg) = &self.debugger { dbg.emit(debug::DebugEvent::Output(s.clone())); }
+                    print!("{}", s);
+                    // Update output column tracking
+                    for ch in s.chars() {
+                        match ch {
+                            '\n' => { self.out_col = 0; }
+                            '\t' => {
+                                let step = 8 - (self.out_col % 8);
+                                self.out_col += step;
+                            }
+                            _ => { self.out_col += 1; }
+                        }
+                    }
+                    let _ = io::stdout().flush();
+                }
                 Op::Pop   => { let _ = self.pop()?; }
                 Op::ToInt => {
                     let v = self.pop()?;
@@ -1353,6 +1384,83 @@ impl VM {
                     args.reverse();
 
                     match bid {
+                        // --- Math builtins ---
+                        70 => { // ABS(x)
+                            if argc != 1 { return Err(BasilError("ABS expects 1 argument".into())); }
+                            match &args[0] {
+                                Value::Int(i) => { self.stack.push(Value::Int(i.abs())); }
+                                other => { let x = self.as_num(other.clone())?; self.stack.push(Value::Num(x.abs())); }
+                            }
+                        }
+                        71 => { // ATN(x) -> arctangent in radians
+                            if argc != 1 { return Err(BasilError("ATN expects 1 argument".into())); }
+                            let x = self.as_num(args[0].clone())?; self.stack.push(Value::Num(x.atan()));
+                        }
+                        72 => { // COS(x) with x in radians
+                            if argc != 1 { return Err(BasilError("COS expects 1 argument".into())); }
+                            let x = self.as_num(args[0].clone())?; self.stack.push(Value::Num(x.cos()));
+                        }
+                        73 => { // EXP(x) -> e^x
+                            if argc != 1 { return Err(BasilError("EXP expects 1 argument".into())); }
+                            let x = self.as_num(args[0].clone())?; self.stack.push(Value::Num(x.exp()));
+                        }
+                        74 => { // INT(x) -> floor(x)
+                            if argc != 1 { return Err(BasilError("INT expects 1 argument".into())); }
+                            match &args[0] {
+                                Value::Int(i) => self.stack.push(Value::Int(*i)),
+                                other => { let x = self.as_num(other.clone())?; self.stack.push(Value::Int(x.floor() as i64)); }
+                            }
+                        }
+                        75 => { // LOG(x) -> natural logarithm
+                            if argc != 1 { return Err(BasilError("LOG expects 1 argument".into())); }
+                            let x = self.as_num(args[0].clone())?;
+                            if x <= 0.0 { return Err(BasilError("LOG domain error: x must be > 0".into())); }
+                            self.stack.push(Value::Num(x.ln()));
+                        }
+                        76 => { // RND() -> random float in [0, 1)
+                            if argc != 0 { return Err(BasilError("RND expects 0 arguments".into())); }
+                            let r = self.rnd_f64();
+                            self.stack.push(Value::Num(r));
+                        }
+                        77 => { // SIN(x)
+                            if argc != 1 { return Err(BasilError("SIN expects 1 argument".into())); }
+                            let x = self.as_num(args[0].clone())?; self.stack.push(Value::Num(x.sin()));
+                        }
+                        78 => { // SQR(x) -> sqrt(x)
+                            if argc != 1 { return Err(BasilError("SQR expects 1 argument".into())); }
+                            let x = self.as_num(args[0].clone())?;
+                            if x < 0.0 { return Err(BasilError("SQR domain error: x must be >= 0".into())); }
+                            self.stack.push(Value::Num(x.sqrt()));
+                        }
+                        79 => { // TAN(x)
+                            if argc != 1 { return Err(BasilError("TAN expects 1 argument".into())); }
+                            let x = self.as_num(args[0].clone())?; self.stack.push(Value::Num(x.tan()));
+                        }
+                        // --- Print helpers and formatting ---
+                        80 => { // SPC(n) -> string of n spaces
+                            if argc != 1 { return Err(BasilError("SPC expects 1 argument".into())); }
+                            let n = match &args[0] { Value::Int(i)=>*i, Value::Num(n)=>n.trunc() as i64, _ => return Err(BasilError("SPC expects numeric argument".into())) };
+                            let n = if n < 0 { 0 } else { n } as usize;
+                            let n = n.min(10000);
+                            self.stack.push(Value::Str(" ".repeat(n)));
+                        }
+                        81 => { // TAB(n) / AT(n) -> pad-to-column helper (1-based column)
+                            if argc != 1 { return Err(BasilError("TAB/AT expects 1 argument".into())); }
+                            let n = match &args[0] { Value::Int(i)=>*i, Value::Num(n)=>n.trunc() as i64, _ => return Err(BasilError("TAB/AT expects numeric argument".into())) };
+                            if n <= 0 { self.stack.push(Value::Str(String::new())); }
+                            else {
+                                let target_col1 = n as usize; // 1-based
+                                let cur1 = self.out_col + 1;   // convert to 1-based
+                                let spaces = if target_col1 <= cur1 { 0 } else { target_col1 - cur1 };
+                                self.stack.push(Value::Str(" ".repeat(spaces)));
+                            }
+                        }
+                        82 => { // USING$(fmt$, ...)
+                            if argc < 1 { return Err(BasilError("USING$ expects at least 1 argument (format)".into())); }
+                            let fmt = match &args[0] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("USING$: first argument must be a string format".into())) };
+                            let out = self.using_format(&fmt, &args[1..])?;
+                            self.stack.push(Value::Str(out));
+                        }
                         1 => { // LEN(arg)
                             if argc != 1 { return Err(BasilError("LEN expects 1 argument".into())); }
                             match &args[0] {
@@ -2967,6 +3075,79 @@ impl VM {
             Value::Dict(_) => "DICT".to_string(),
             Value::StrArray2D { .. } => "STRING[][]".to_string(),
         }
+    }
+
+    // --- RNG helpers for RND() ---
+    fn rnd_u64(&mut self) -> u64 {
+        // xorshift64*
+        let mut x = self.rng_state;
+        if x == 0 { x = 0xA5A5_5A5A_DEAD_BEEFu64; }
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.rng_state = x;
+        x
+    }
+    fn rnd_f64(&mut self) -> f64 {
+        // Use upper 53 bits to create a uniform in [0,1)
+        let u = self.rnd_u64() >> 11; // 53 bits
+        (u as f64) / ((1u64 << 53) as f64)
+    }
+
+    // --- USING$ formatter: supports %d, %f, %s with optional width and precision ---
+    fn using_format(&self, fmt: &str, args: &[Value]) -> Result<String> {
+        let mut out = String::new();
+        let mut i = 0usize; // index in fmt
+        let bytes = fmt.as_bytes();
+        let mut ai = 0usize; // argument index
+        while i < bytes.len() {
+            let c = bytes[i] as char;
+            if c != '%' {
+                out.push(c);
+                i += 1;
+                continue;
+            }
+            // '%%' -> '%'
+            if i + 1 < bytes.len() && bytes[i+1] as char == '%' { out.push('%'); i += 2; continue; }
+            // parse width and precision
+            i += 1; // skip '%'
+            let mut width: Option<usize> = None;
+            let mut prec: Option<usize> = None;
+            // optional width digits
+            let mut acc: usize = 0; let mut saw = false;
+            while i < bytes.len() { let ch = bytes[i] as char; if ch.is_ascii_digit() { saw = true; acc = acc*10 + (ch as usize - '0' as usize); i+=1; } else { break; } }
+            if saw { width = Some(acc); }
+            // optional .precision
+            if i < bytes.len() && bytes[i] as char == '.' {
+                i += 1; acc = 0; saw = false;
+                while i < bytes.len() { let ch = bytes[i] as char; if ch.is_ascii_digit() { saw = true; acc = acc*10 + (ch as usize - '0' as usize); i+=1; } else { break; } }
+                if saw { prec = Some(acc); } else { prec = Some(0); }
+            }
+            if ai >= args.len() { return Err(BasilError("USING$: not enough arguments for format specifiers".into())); }
+            if i >= bytes.len() { return Err(BasilError("USING$: missing format type after %".into())); }
+            let t = bytes[i] as char; i += 1;
+            let a = &args[ai]; ai += 1;
+            match t {
+                'd' | 'i' => {
+                    let n = match a { Value::Int(i)=>*i, Value::Num(n)=> n.trunc() as i64, Value::Bool(b)=> if *b {1} else {0}, other=> return Err(BasilError(format!("USING$: %d expects numeric, got {}", self.type_of(other)))) };
+                    if let Some(w) = width { out.push_str(&format!("{:>width$}", n, width=w)); } else { out.push_str(&format!("{}", n)); }
+                }
+                'f' | 'F' => {
+                    let x = match a { Value::Num(n)=>*n, Value::Int(i)=> *i as f64, Value::Bool(b)=> if *b {1.0} else {0.0}, other=> return Err(BasilError(format!("USING$: %f expects numeric, got {}", self.type_of(other)))) };
+                    let p = prec.unwrap_or(6);
+                    match width {
+                        Some(w) => out.push_str(&format!("{:>width$.prec$}", x, width=w, prec=p)),
+                        None => out.push_str(&format!("{:.prec$}", x, prec=p)),
+                    }
+                }
+                's' | 'S' => {
+                    let s = match a { Value::Str(s)=>s.clone(), other=> format!("{}", other) };
+                    if let Some(w) = width { out.push_str(&format!("{:>width$}", s, width=w)); } else { out.push_str(&s); }
+                }
+                other => { return Err(BasilError(format!("USING$: unsupported format type '%{}'", other))); }
+            }
+        }
+        Ok(out)
     }
 
     fn resolve_class_candidates(&self, fname: &str) -> Vec<std::path::PathBuf> {
