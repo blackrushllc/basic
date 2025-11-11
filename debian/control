@@ -1,0 +1,19 @@
+Source: basic
+Section: devel
+Priority: optional
+Maintainer: Erik Olson <erikolson1965@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ cargo,
+ rustc,
+ pkg-config
+Standards-Version: 4.7.0
+Homepage: https://basilbasic.com
+Rules-Requires-Root: no
+
+Package: basic
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Simple BASIC interpreter written in Rust
+ A minimal BASIC interpreter implemented in Rust.
+ This package installs the 'basic' command-line interpreter.

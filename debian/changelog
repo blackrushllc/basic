@@ -1,0 +1,18 @@
+basic (1.0.1-0ubuntu1~noble1) noble; urgency=medium
+
+  * New upstream 1.0.1: drop Cargo.lock to avoid lockfile v4 issue on
+    Noble.
+
+ -- root <erikolson1965@gmail.com>  Tue, 11 Nov 2025 02:32:19 +0000
+
+basic (1.0.0-0ubuntu1~noble1ubuntu1) noble; urgency=medium
+
+  * Fix build on Launchpad: remove cargo buildsystem requirement.
+
+ -- root <erikolson1965@gmail.com>  Tue, 11 Nov 2025 02:19:07 +0000
+
+basic (1.0.0-0ubuntu1~noble1) noble; urgency=medium
+
+  * Initial release of BASIC interpreter (Rust, single binary).
+
+ -- Erik Olson <erikolson1965@gmail.com>  Mon, 10 Nov 2025 19:00:00 -0500
