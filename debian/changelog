@@ -1,4 +1,4 @@
-basic (1.0.1-0ubuntu1~noble1) UNRELEASED; urgency=medium
+basic (1.0.1-0ubuntu1~noble1) noble; urgency=medium
 
   * New upstream 1.0.1: drop Cargo.lock to avoid lockfile v4 issue on
     Noble.
