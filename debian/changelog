@@ -1,3 +1,9 @@
+basic (1.0.5-0ubuntu1~noble1) noble; urgency=medium
+
+  * New upstream 1.0.5: track full vendor tree for offline builds.
+
+ -- root <erikolson1965@gmail.com>  Tue, 11 Nov 2025 19:45:43 +0000
+
 basic (1.0.4-0ubuntu1~noble1) noble; urgency=medium
 
   * New upstream 1.0.4: vendor cleanup, remove Cargo.toml.orig and
