@@ -12,7 +12,7 @@
       ░                  ░
 Copyright (C) 2026, Blackrush LLC
 Created by Erik Olson, Tarpon Springs, Florida
-For more information, visit BlackrushDrive.com
+For more information, visit BasilBasic.com
 
 MIT License
 

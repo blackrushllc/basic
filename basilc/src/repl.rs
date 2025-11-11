@@ -185,7 +185,7 @@ pub fn start_repl(mut sess: Session, maybe_path: Option<String>) {
     // Simple stdio REPL (no external line editor for lean build)
 
     // Old-school banner
-    println!("BASIL - A BASIC Bytecode Interpreter and Compiler");
+    println!("BASIC Bytecode Interpreter");
     println!("Copyright (C) Blackrush LLC .");
     println!("Open Source Software under MIT License");
     println!("");

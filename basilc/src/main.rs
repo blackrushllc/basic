@@ -13,7 +13,7 @@
       ░                  ░
 Copyright (C) 2026, Blackrush LLC
 Created by Erik Lee Olson, Tarpon Springs, Florida
-For more information, visit BlackrushDrive.com
+For more information, visit BasilBasic.com
 
 MIT License
 
@@ -141,21 +141,22 @@ fn canonicalize(cmd: &str) -> &str {
 
 fn print_help() {
     println!("Basic CLI (lean edition)\n");
-    println!("Commands (aliases in parentheses):");
-    println!("  run  (sprout)      Parse → compile → run a .bas file");
-    println!("  test (cultivate)   Run program in test mode with auto-mocked input");
-    println!("  lex  (chop)        Dump tokens from a .bas file (debug)");
-    println!("  --analyze <file> [--json]  Run compiler analysis and print diagnostics/symbols");
-    println!("  --debug <file>             Run Basic VM (events printed to stderr)\n");
+    println!("Commands:");
+    println!("  run        Parse → compile → run a .bas file");
+    println!("  test       Run program in test mode with auto-mocked input");
+    println!("  lex        Dump tokens from a .bas file (debug)");
+    println!("  make       Export a template, examples or upgrade");
+    println!("");
     println!("Usage:");
     println!("  basic <command> [args]\n");
     println!("Examples:");
+    println!("  basic make examples");
+    println!("  basic make examples/hello.bas");
     println!("  basic run examples/hello.bas");
     println!("  basic lex examples/hello.bas");
-    println!("  basic --analyze examples/hello.bas --json");
-    println!("  basic --debug examples/hello.bas");
+    println!("  basic make upgrade");
     println!("");
-    println!("Type 'status' to see objects, or try PRINT \"Hello, World!\";;");
+    println!("Type 'quit' to exit, 'status' to see objects, or try PRINT \"Hello, World!\";; <-- two semicolons to run.");
     println!("");
 }
 
