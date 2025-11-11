@@ -1,5 +1,12 @@
 basic (1.0.3-0ubuntu1~noble1) noble; urgency=medium
 
+  * New upstream 1.0.3: vendor cleanup, remove Cargo.toml.orig and
+    checksums.
+
+ -- root <root@Bob@YoBASIC.com>  Tue, 11 Nov 2025 18:06:15 +0000
+
+basic (1.0.3-0ubuntu1~noble1) noble; urgency=medium
+
   * New upstream 1.0.3: ensure vendored Cargo.toml.orig files included.
 
  -- root <erikolson1965@gmail.com>  Tue, 11 Nov 2025 04:23:45 +0000
