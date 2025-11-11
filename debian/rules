@@ -1,0 +1,24 @@
+#!/usr/bin/make -f
+
+export CARGO_HOME=$(CURDIR)/.cargo-home
+export RUSTFLAGS=
+export DEB_CARGO_CRATE=basic
+
+%:
+	dh $@ --buildsystem=cargo
+
+override_dh_auto_configure:
+	# No special configure step needed for a pure Cargo project
+	:
+
+override_dh_auto_build:
+	cargo build --release --locked --frozen --offline
+
+override_dh_auto_test:
+	# You can enable this later if you have tests that work offline
+	# cargo test --locked --frozen --offline
+	:
+
+override_dh_auto_install:
+	# Install the compiled binary into debian/basic/usr/bin
+	install -D -m0755 target/release/basic debian/basic/usr/bin/basic

@@ -1,0 +1,5 @@
+basic (1.0.0-0ubuntu1~noble1) noble; urgency=medium
+
+  * Initial release of BASIC interpreter (Rust, single binary).
+
+ -- Erik Olson <erikolson1965@gmail.com>  Mon, 10 Nov 2025 19:00:00 -0500
