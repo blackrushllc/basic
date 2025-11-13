@@ -62,6 +62,33 @@ Basic is essentially the same as Basil except that it omits advanced features li
 - And more...
 ---
 
+### Core built-ins for upgrades and utilities
+
+This build includes two always-available built-in functions intended to help tooling like upgrade.bas and other utilities:
+
+- EXEPATH$()
+  - Returns the absolute directory path of the currently running executable, or an empty string on failure.
+  - Example:
+    
+    PRINT "EXEPATH = "; EXEPATH$()
+
+- NET_DOWNLOAD_FILE%(url$, destPath$)
+  - Downloads a file from a URL to the given destination path. Returns 0 on success, non-zero on error.
+  - Return codes:
+    - 0 = success
+    - 1 = invalid/unsupported URL
+    - 2 = HTTP error (non-2xx)
+    - 3 = network/TLS/IO error during transfer (in this Basic build, HTTPS URLs return 3)
+    - 4 = file write/filesystem error
+    - 99 = unexpected internal error
+  - The function is blocking, creates parent directories as needed, writes to a temporary file and then renames to avoid partial files.
+  - Example:
+
+    rc% = NET_DOWNLOAD_FILE%("http://example.com/", "tmp/example.html")
+    PRINT "RC = "; rc%
+
+Note: In this lean Basic build, the downloader uses a minimal in-process HTTP/1.1 client without external dependencies. HTTPS is not currently supported here and will return code 3. The full Basil distribution may provide HTTPS via optional features.
+
 ### Two ways to say the same thing (both valid in Basic/Basil🌿)
 Classic BASIC style:
 

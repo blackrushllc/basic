@@ -51,6 +51,214 @@ use crossterm::event::poll;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
+// Note: Write trait is already imported via `use std::io::{self, Write, Read, Seek, SeekFrom};` above.
+
+// Helper: blocking HTTP download with error mapping
+// Return codes:
+//   0 = success
+//   1 = invalid/unsupported URL
+//   2 = HTTP error (non-2xx)
+//   3 = network/TLS/IO error during transfer
+//   4 = file write/filesystem error
+//   99 = unexpected internal error
+fn net_download_file_blocking(url: &str, dest_path: &str) -> i32 {
+    use std::fs;
+    use std::io::{Read, Write, BufRead, BufReader};
+    use std::net::TcpStream;
+    use std::path::Path;
+    use std::time::Duration;
+
+    // Minimal URL parse: support http://host[:port]/path. https:// not supported here.
+    let lower = url.to_string();
+    let scheme_sep = match lower.find("://") {
+        Some(i) => i,
+        None => return 1, // invalid URL
+    };
+    let scheme = &lower[..scheme_sep];
+    let rest = &lower[(scheme_sep + 3)..];
+
+    if scheme.eq_ignore_ascii_case("https") {
+        // TLS not implemented in core (no external deps). Treat as network/TLS error per mapping.
+        return 3;
+    }
+    if !scheme.eq_ignore_ascii_case("http") {
+        return 1; // unsupported scheme
+    }
+
+    // Split authority and path
+    let (authority, path_part) = match rest.find('/') {
+        Some(idx) => (&rest[..idx], &rest[idx..]),
+        None => (rest, "/"),
+    };
+    if authority.is_empty() {
+        return 1;
+    }
+
+    // Parse host and port (IPv6 with brackets or IPv4/hostname)
+    // Declare without initial assignment to avoid unused assignment warning; set in branches below
+    let host: String;
+    let mut port: u16 = 80;
+    if authority.starts_with('[') {
+        // [IPv6]:port
+        if let Some(end) = authority.find(']') {
+            host = authority[1..end].to_string();
+            if let Some(colon) = authority[end+1..].find(':') {
+                let pstr = &authority[end+1+colon+1..];
+                port = pstr.parse().unwrap_or(80);
+            }
+        } else {
+            return 1;
+        }
+    } else {
+        if let Some(colon) = authority.rfind(':') {
+            host = authority[..colon].to_string();
+            let pstr = &authority[colon+1..];
+            if !pstr.is_empty() { port = pstr.parse().unwrap_or(80); }
+        } else {
+            host = authority.to_string();
+        }
+    }
+    if host.is_empty() { return 1; }
+    let path_str = if path_part.is_empty() { "/" } else { path_part };
+
+    // Prepare destination and temp file
+    let dest = Path::new(dest_path);
+    if let Some(parent) = dest.parent() {
+        if let Err(_) = fs::create_dir_all(parent) {
+            return 4;
+        }
+    }
+    let tmp_path = dest.with_extension("download.tmp");
+
+    // Connect
+    let addr = format!("{}:{}", host, port);
+    let mut stream = match TcpStream::connect(&addr) {
+        Ok(s) => s,
+        Err(_) => return 3,
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
+
+    // Build Host header value (include port if non-default)
+    let host_header = if port == 80 { authority.to_string() } else { authority.to_string() };
+    let req = format!(
+        "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: BasilBasic/1.0\r\nAccept: */*\r\nConnection: close\r\n\r\n",
+        path_str,
+        host_header
+    );
+    if stream.write_all(req.as_bytes()).is_err() { return 3; }
+
+    let mut reader = BufReader::new(stream);
+
+    // Read status line
+    let mut status_line = String::new();
+    if reader.read_line(&mut status_line).is_err() { return 3; }
+    // Example: HTTP/1.1 200 OK
+    let mut status_code: u16 = 0;
+    {
+        let parts: Vec<&str> = status_line.split_whitespace().collect();
+        if parts.len() >= 2 { status_code = parts[1].parse().unwrap_or(0); }
+    }
+
+    // Read headers
+    let mut is_chunked = false;
+    let mut content_length: Option<usize> = None;
+    loop {
+        let mut line = String::new();
+        let n = match reader.read_line(&mut line) { Ok(n) => n, Err(_) => return 3 };
+        if n == 0 { return 3; }
+        let ltrim = line.trim_end_matches(['\r','\n']);
+        if ltrim.is_empty() { break; }
+        let lcase = ltrim.to_ascii_lowercase();
+        if lcase.starts_with("transfer-encoding:") && lcase.contains("chunked") { is_chunked = true; }
+        if lcase.starts_with("content-length:") {
+            if let Some(idx) = lcase.find(':') {
+                let num = lcase[idx+1..].trim();
+                if let Ok(n) = num.parse::<usize>() { content_length = Some(n); }
+            }
+        }
+    }
+
+    if status_code < 200 || status_code >= 300 { return 2; }
+
+    // Open temp file
+    let mut outfile = match fs::File::create(&tmp_path) {
+        Ok(f) => f,
+        Err(_) => return 4,
+    };
+
+    // Body reading helpers
+    if is_chunked {
+        // Decode chunked transfer encoding
+        loop {
+            // Read chunk size line
+            let mut size_line = String::new();
+            let n = match reader.read_line(&mut size_line) { Ok(n) => n, Err(_) => { let _ = fs::remove_file(&tmp_path); return 3; } };
+            if n == 0 { let _ = fs::remove_file(&tmp_path); return 3; }
+            let size_str = size_line.trim_end_matches(['\r','\n']).trim();
+            // Strip optional chunk extensions after ';'
+            let size_only = match size_str.split_once(';') { Some((s, _)) => s.trim(), None => size_str };
+            let size = match usize::from_str_radix(size_only, 16) { Ok(v) => v, Err(_) => { let _ = fs::remove_file(&tmp_path); return 3; } };
+            if size == 0 {
+                // Read trailing CRLF after 0-length chunk, and optional trailer headers until blank line
+                // Consume one empty line
+                let mut line = String::new();
+                // Read the CRLF after the 0-size line body (which is empty) if present
+                let _ = reader.read_line(&mut line);
+                // Consume trailer headers
+                loop {
+                    line.clear();
+                    let n2 = match reader.read_line(&mut line) { Ok(n) => n, Err(_) => break };
+                    if n2 == 0 { break; }
+                    if line.trim_end_matches(['\r','\n']).is_empty() { break; }
+                }
+                break;
+            }
+            let mut remaining = size;
+            const BUF_SZ: usize = 32 * 1024;
+            let mut buf = vec![0u8; BUF_SZ];
+            while remaining > 0 {
+                let to_read = remaining.min(BUF_SZ);
+                let mut read_bytes = 0usize;
+                while read_bytes < to_read {
+                    match reader.read(&mut buf[read_bytes..to_read]) {
+                        Ok(0) => { let _ = fs::remove_file(&tmp_path); return 3; }
+                        Ok(m) => read_bytes += m,
+                        Err(_) => { let _ = fs::remove_file(&tmp_path); return 3; }
+                    }
+                }
+                if outfile.write_all(&buf[..to_read]).is_err() { let _ = fs::remove_file(&tmp_path); return 4; }
+                remaining -= to_read;
+            }
+            // consume CRLF at end of chunk
+            let mut crlf = [0u8; 2];
+            if reader.read_exact(&mut crlf).is_err() { let _ = fs::remove_file(&tmp_path); return 3; }
+        }
+    } else if let Some(len) = content_length {
+        let mut remaining = len;
+        const BUF_SZ: usize = 32 * 1024;
+        let mut buf = vec![0u8; BUF_SZ];
+        while remaining > 0 {
+            let to_read = remaining.min(BUF_SZ);
+            let n = match reader.read(&mut buf[..to_read]) { Ok(n) => n, Err(_) => { let _ = fs::remove_file(&tmp_path); return 3; } };
+            if n == 0 { let _ = fs::remove_file(&tmp_path); return 3; }
+            if outfile.write_all(&buf[..n]).is_err() { let _ = fs::remove_file(&tmp_path); return 4; }
+            remaining -= n;
+        }
+    } else {
+        // Unknown length: read to EOF
+        let mut buf = Vec::with_capacity(64 * 1024);
+        match reader.read_to_end(&mut buf) { Ok(_) => {}, Err(_) => { let _ = fs::remove_file(&tmp_path); return 3; } }
+        if outfile.write_all(&buf).is_err() { let _ = fs::remove_file(&tmp_path); return 4; }
+    }
+
+    // Finalize
+    if let Err(_) = fs::rename(&tmp_path, dest) {
+        let _ = fs::remove_file(&tmp_path);
+        return 4;
+    }
+    0
+}
 
 pub mod debug;
 mod basil_objects;
@@ -2172,6 +2380,21 @@ impl VM {
                                     self.stack.push(Value::Int(0));
                                 }
                             }
+                        }
+                        64 => { // EXEPATH$() -> STRING (directory of current executable or "")
+                            if argc != 0 { return Err(BasilError("EXEPATH$ expects 0 arguments".into())); }
+                            let s = match std::env::current_exe() {
+                                Ok(p) => p.parent().and_then(|pp| pp.to_str()).unwrap_or("").to_string(),
+                                Err(_) => String::new(),
+                            };
+                            self.stack.push(Value::Str(s));
+                        }
+                        65 => { // NET_DOWNLOAD_FILE%(url$, destPath$) -> Int status code
+                            if argc != 2 { return Err(BasilError("NET_DOWNLOAD_FILE% expects 2 arguments (url$, destPath$)".into())); }
+                            let url = match &args[0] { Value::Str(s)=>s.clone(), other=>format!("{}", other) };
+                            let dest = match &args[1] { Value::Str(s)=>s.clone(), other=>format!("{}", other) };
+                            let rc = net_download_file_blocking(&url, &dest);
+                            self.stack.push(Value::Int(rc as i64));
                         }
                         #[cfg(feature = "obj-base64")]
                         90 => { // BASE64_ENCODE$(text$)
