@@ -41,6 +41,3 @@ obj-orm = []
 obj-orm-mysql = []
 obj-orm-postgres = []
 embed-test = []
-
-[dev-dependencies]
-tempfile = "3"

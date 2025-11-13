@@ -32,7 +32,10 @@ pub static EMBEDDED_FILES: &[EmbeddedFile] = &["#
     for logical in entries {
         // We generate lines like:
         // EmbeddedFile { path: "examples/hello.bas", contents: include_bytes!("includes/examples/hello.bas") },
-        let include_path = format!("includes/{}", logical);
+        // But because this file is emitted under OUT_DIR and then included!,
+        // relative paths like "includes/..." won't resolve. Use an absolute path
+        // anchored at the crate's includes/ directory.
+        let include_path = includes_root.join(&logical).display().to_string();
         writeln!(
             f,
             "    EmbeddedFile {{ path: {lp:?}, contents: include_bytes!({ip:?}) }},",

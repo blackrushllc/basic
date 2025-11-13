@@ -64,7 +64,7 @@ pub fn extract_dir(dir: &str, dest_root: &Path) -> std::io::Result<()> {
         }
     }
     if !found_any {
-        return Err(not_found(dir));
+        return Err(not_found(&dir));
     }
     Ok(())
 }
@@ -94,7 +94,7 @@ pub fn is_unsafe_target(target: &str) -> bool {
 }
 
 fn normalize_target(s: &str) -> String {
-    s.replace('\\', "/").trim_start_matches('./').to_string()
+    s.replace('\\', "/").trim_start_matches("./").to_string()
 }
 
 fn join_forward_slash(root: &Path, mid: &str, rel: &str) -> PathBuf {
