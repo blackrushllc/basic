@@ -58,6 +58,7 @@ use std::collections::HashMap;
 mod template;
 mod repl;
 use template::{precompile_template, parse_directives_and_bom, Directives};
+mod embedded;
 
 fn cmd_analyze(path: String, json: bool) {
     let src = match std::fs::read_to_string(&path) {
@@ -145,7 +146,7 @@ fn print_help() {
     println!("  run        Parse → compile → run a .bas file");
     println!("  test       Run program in test mode with auto-mocked input");
     println!("  lex        Dump tokens from a .bas file (debug)");
-    println!("  make       Export a template, examples or upgrade");
+    println!("  make       Export an embedded file or directory (use --list to see available)");
     println!("");
     println!("Usage:");
     println!("  basic <command> [args]\n");
@@ -155,9 +156,64 @@ fn print_help() {
     println!("  basic run examples/hello.bas");
     println!("  basic lex examples/hello.bas");
     println!("  basic make upgrade");
+    println!("  basic make --list");
     println!("");
     println!("Type 'quit' to exit, 'status' to see objects, or try PRINT \"Hello, World!\";; <-- two semicolons to run.");
     println!("");
+}
+
+fn print_embedded_inventory() {
+    println!("Embedded files:");
+    for p in embedded::list_all_paths() {
+        println!("  {}", p);
+    }
+    let dirs = embedded::list_top_level_dirs();
+    if !dirs.is_empty() {
+        println!("\nTop-level dirs: {}", dirs.join(", "));
+    }
+}
+
+fn handle_make(target: &str) -> Result<(), String> {
+    if embedded::is_unsafe_target(target) {
+        return Err(format!("Refusing unsafe target: {target}"));
+    }
+
+    let cwd = env::current_dir().map_err(|e| e.to_string())?;
+
+    let is_dir = embedded::has_dir(target);
+    let file = embedded::find_file(target);
+
+    if is_dir && file.is_none() {
+        embedded::extract_dir(target, &cwd).map_err(|e| e.to_string())?;
+        println!("Wrote directory: {target}/");
+        return Ok(());
+    }
+
+    if let Some(_f) = file {
+        let out = embedded::write_single(target, &cwd).map_err(|e| e.to_string())?;
+        println!("Wrote file: {}", out.display());
+
+        // Run the script if single file. Allow skipping in tests via env.
+        if env::var("BASIL_SKIP_RUN_AFTER_MAKE").ok().as_deref() != Some("1") {
+            run_script(&out)?;
+        }
+        return Ok(());
+    }
+
+    if is_dir {
+        embedded::extract_dir(target, &cwd).map_err(|e| e.to_string())?;
+        println!("Wrote directory: {target}/");
+        return Ok(());
+    }
+
+    // Nothing matched
+    Err(format!("No embedded file or dir named {target:?}. Try `basic make --list`."))
+}
+
+fn run_script(path: &PathBuf) -> Result<(), String> {
+    // Reuse existing CLI run flow; accepts Option<String>
+    cmd_run(Some(path.to_string_lossy().into_owned()));
+    Ok(())
 }
 
 fn cmd_init(target: Option<String>) -> io::Result<()> {
@@ -370,6 +426,30 @@ fn cli_main() {
         }
         "run" => {
             cmd_run(args.get(0).cloned());
+        }
+        "make" => {
+            // Parse flags: --list/-l or a single target
+            let mut list = false;
+            let mut target: Option<String> = None;
+            for a in args.iter() {
+                if a == "--list" || a == "-l" {
+                    list = true;
+                } else if target.is_none() {
+                    target = Some(a.clone());
+                }
+            }
+            if list {
+                print_embedded_inventory();
+                return;
+            }
+            let Some(tgt) = target else {
+                eprintln!("usage: basic make <target> | --list");
+                std::process::exit(2);
+            };
+            if let Err(e) = handle_make(&tgt) {
+                eprintln!("make error: {e}");
+                std::process::exit(1);
+            }
         }
         "cli" => {
             // basilc cli [path]
