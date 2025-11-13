@@ -1,0 +1,6 @@
+# Do not touch vendored sources or Cargo vendor metadata — exact bytes must be preserved
+vendor/** -text
+.cargo/** -text
+
+# Keep our own Rust source files with LF line endings on all platforms
+*.rs text eol=lf
