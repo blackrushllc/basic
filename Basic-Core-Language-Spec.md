@@ -72,7 +72,7 @@ A program is a single source text. Include/import mechanisms are out of scope fo
 4. Lexical Grammar (normative)
 4.1 Tokens and Punctuation
 - Punctuation: `(` `)` `{` `}` `[` `]` `,` `;` `:` `+` `-` `*` `/` `.` `=` `==` `!=` `<>` `<` `<=` `>` `>=`
-- Keywords (case‑insensitive): `FUNC` `FUNCTION` `SUB` `RETURN` `IF` `THEN` `ELSE` `WHILE` `DO` `BEGIN` `END` `ENDIF` `ENDFUNC` `ENDFUNCTION` `ENDSUB` `ENDWHILE` `ENDBLOCK` `WITH` `BREAK` `CONTINUE` `LET` `PRINT` `PRINTLN` `TRUE` `FALSE` `NULL` `AND` `OR` `NOT` `AUTHOR` `FOR` `TO` `STEP` `NEXT` `EACH` `IN` `FOREACH` `ENDFOR` `DIM` `AS` `DESCRIBE` `NEW` `CLASS` `TYPE` `SELECT` `CASE` `IS` `TRY` `CATCH` `FINALLY` `RAISE` `SETENV` `EXPORTENV` `SHELL` `EXIT` `STOP` `LABEL` `GOTO` `GOSUB` `MOD` `EXEC` `EVAL`.
+- Keywords (case‑insensitive): `FUNC` `FUNCTION` `SUB` `RETURN` `IF` `THEN` `ELSE` `WHILE` `DO` `BEGIN` `END` `ENDIF` `ENDFUNC` `ENDFUNCTION` `ENDSUB` `ENDWHILE` `ENDBLOCK` `WITH` `BREAK` `CONTINUE` `LET` `PRINT` `PRINTLN` `TRUE` `FALSE` `NULL` `AND` `OR` `NOT` `AUTHOR` `FOR` `TO` `STEP` `NEXT` `EACH` `IN` `FOREACH` `ENDFOR` `DIM` `AS` `DESCRIBE` `NEW` `CLASS` `TYPE` `SELECT` `CASE` `IS` `TRY` `CATCH` `FINALLY` `RAISE` `SETENV` `EXPORTENV` `SHELL` `EXIT` `STOP` `LABEL` `GOTO` `GOSUB` `MOD` `EXEC` `EVAL` `CONST`.
 - Identifiers: see 4.3.
 - Literals: numbers (4.4.1), strings (4.4.2), booleans (`TRUE`/`FALSE`), `NULL`.
 
@@ -148,18 +148,25 @@ Short-circuit:
   - Standalone brace blocks `{ … }` and `BEGIN … END` blocks act as statements anywhere a statement is expected.
 
 6.3 Variable Declarations and Assignment
-- `DIM` declares arrays, fixed strings, and objects (8.2). Examples:
+- `CONST` declares an immutable binding initialized once:
+  - Syntax: `CONST Name = expr`.
+  - The identifier MUST NOT have a type suffix (`$` `%` `@`).
+  - The initializer may be any expression; its value is evaluated at declaration time.
+  - Reassigning a constant MUST be diagnosed as an error.
+- `DIM` declares arrays, fixed strings, objects, and may declare multiple scalars with defaults (8.2). Examples:
   - `DIM a(10)`; `DIM s$[20]` (fixed‑length string); `DIM s$ AS STRING * 20`.
   - `DIM p@ AS TypeName(args)`; `DIM arr@(5,10) [AS TypeName]`.
   - `DIM name = expr` initializes a scalar; if `name` ends with `%` or `$` and `expr` is a list literal, it desugars into an array declaration plus element assignments (1‑based indexes).
-- `LET` assigns to variables/array elements and object properties:
-  - `LET x = expr`.
-  - `LET arr(i, j) = expr` (parentheses indexing for arrays).
-  - `LET obj.Prop = expr`.
-  - `LET list[key] = expr` (square‑bracket index for lists/dicts).
-- Assignment without `LET`:
-  - Allowed only for object property set `obj.Prop = expr` and square‑bracket index set `obj[expr] = expr`.
-  - Otherwise, using `=` in an expression is equality test, not assignment; implementations MUST diagnose `Use LET for assignment` in invalid contexts.
+  - `DIM a$, b$, c$` declares multiple scalars; defaults are `""` for `$`, `0` for `%`, and `0` for unsuffixed numerics.
+- Assignment forms:
+  - `LET x = expr` assigns to a scalar; `LET arr(i, j) = expr` assigns to array element.
+  - `LET obj.Prop = expr` sets an object property.
+  - `LET list[key] = expr` sets a list/dict element.
+  - Implicit LET is allowed when a statement begins with a variable (including suffix) or an array element followed by `=`:
+    - `x = expr`; `arr(i) = expr` are valid.
+    - Property/index assignments also allow omission of `LET`: `obj.Prop = expr`, `list[key] = expr`.
+  - Using `=` in general expressions remains equality testing.
+  - Assignments to constants MUST be rejected.
 
 6.4 Labels, `GOTO`, `GOSUB`, `RETURN` (constraints)
 - Label declaration: `LABEL name` or colon form `name:` at statement start.

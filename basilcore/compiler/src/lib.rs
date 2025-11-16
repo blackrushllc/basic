@@ -177,6 +177,8 @@ struct C {
     var_struct_globs: HashMap<String, String>,            // var -> TypeName (upper)
     // Arrays of struct element type bindings (globals)
     var_struct_array_globs: HashMap<String, String>,
+    // Constants declared at top level (store as UPPERCASE for CI compare)
+    const_globs: HashSet<String>,
 }
 
 impl C {
@@ -203,6 +205,7 @@ impl C {
             fixed_globs: HashMap::new(),
             var_struct_globs: HashMap::new(),
             var_struct_array_globs: HashMap::new(),
+            const_globs: HashSet::new(),
         }
     }
 
@@ -218,6 +221,23 @@ impl C {
         match s {
             // No code emission for forward declarations
             Stmt::Declare { .. } => { /* ignore at codegen */ }
+            // CONST at top level: evaluate once and store to a global; mark immutable
+            Stmt::Const { name, value } => {
+                // Prevent redefinition
+                let uname = name.to_ascii_uppercase();
+                if self.const_globs.contains(&uname) {
+                    return Err(BasilError(format!("Constant '{}' already defined", name)));
+                }
+                if self.gmap.contains_key(name) {
+                    return Err(BasilError(format!("Name '{}' already defined; cannot redeclare as CONST", name)));
+                }
+                let mut chunk = std::mem::take(&mut self.chunk);
+                self.emit_expr_in(&mut chunk, value, None)?;
+                let g = self.gslot(name);
+                chunk.push_op(Op::StoreGlobal); chunk.push_u8(g);
+                self.const_globs.insert(uname);
+                self.chunk = chunk;
+            }
             // Compile function to a Function value and store into a global.
             Stmt::Func { name, params, body, .. } => {
                 // remember function name for call vs array indexing disambiguation
@@ -280,6 +300,10 @@ impl C {
                 let mut chunk = std::mem::take(&mut self.chunk);
                 match indices {
                     None => {
+                        // Immutability: top-level lets target globals; disallow if CONST defined
+                        if self.const_globs.contains(&name.to_ascii_uppercase()) {
+                            return Err(BasilError(format!("Cannot assign to constant '{}'", name)));
+                        }
                         // Detect struct <-> string pack/unpack first
                         if let Some(ty_s) = self.var_struct_globs.get(name).cloned() {
                             // LET <struct> = <string>
@@ -324,6 +348,10 @@ impl C {
                         chunk.push_u8(g);
                     }
                     Some(idxs) => {
+                        // Assigning to element of a global variable; if target name is a CONST, disallow
+                        if self.const_globs.contains(&name.to_ascii_uppercase()) {
+                            return Err(BasilError(format!("Cannot assign to constant '{}'", name)));
+                        }
                         // array element assignment or whole-array assignment if idxs is empty: name$() = expr
                         if idxs.is_empty() {
                             // Evaluate RHS and convert from StrArray2D to real 2D string array via builtin 138
@@ -605,6 +633,12 @@ impl C {
             }
             Stmt::SetProp { target, prop, value } => {
                 let mut chunk = std::mem::take(&mut self.chunk);
+                // If target is a global variable name and it's const, reject
+                if let Expr::Var(nm) = target {
+                    if self.const_globs.contains(&nm.to_ascii_uppercase()) {
+                        return Err(BasilError(format!("Cannot assign to constant '{}'", nm)));
+                    }
+                }
                 // push target object/dict first
                 self.emit_expr_in(&mut chunk, target, None)?;
                 // Determine field coercion if target is a known struct type
@@ -634,6 +668,12 @@ impl C {
             }
             Stmt::SetIndexSquare { target, index, value } => {
                 let mut chunk = std::mem::take(&mut self.chunk);
+                // If target is a global variable name and it's const, reject mutation
+                if let Expr::Var(nm) = target {
+                    if self.const_globs.contains(&nm.to_ascii_uppercase()) {
+                        return Err(BasilError(format!("Cannot assign to constant '{}'", nm)));
+                    }
+                }
                 self.emit_expr_in(&mut chunk, target, None)?;
                 self.emit_expr_in(&mut chunk, index, None)?;
                 self.emit_expr_in(&mut chunk, value, None)?;
@@ -924,9 +964,31 @@ impl C {
     fn emit_stmt_func(&mut self, chunk: &mut Chunk, s: &Stmt, env: &mut LocalEnv) -> Result<()> {
         match s {
             Stmt::Declare { .. } => { /* no-op inside bodies */ },
+            // Local constant: evaluate once, assign into a local slot, and mark immutable
+            Stmt::Const { name, value } => {
+                let uname = name.to_ascii_uppercase();
+                if env.consts.contains(&uname) {
+                    return Err(BasilError(format!("Constant '{}' already defined in this scope", name)));
+                }
+                // Disallow shadowing a known global constant? Allowing shadowing for now seems fine; but prevent if a mutable local exists
+                if env.lookup(name).is_some() {
+                    return Err(BasilError(format!("Name '{}' already defined; cannot redeclare as CONST", name)));
+                }
+                self.emit_expr_in(chunk, value, Some(env))?;
+                let slot = env.bind_next_if_absent(name.clone());
+                chunk.push_op(Op::StoreLocal); chunk.push_u8(slot);
+                env.consts.insert(uname);
+            }
             Stmt::Let { name, indices, init } => {
                 match indices {
                     None => {
+                        // Immutability: disallow assigning to const locals or globals
+                        if env.consts.contains(&name.to_ascii_uppercase()) {
+                            return Err(BasilError(format!("Cannot assign to constant '{}'", name)));
+                        }
+                        if self.const_globs.contains(&name.to_ascii_uppercase()) {
+                            return Err(BasilError(format!("Cannot assign to constant '{}'", name)));
+                        }
                         // Detect struct <-> string conversions first
                         if let Some(ty_s) = env.var_struct.get(name).cloned().or_else(|| self.var_struct_globs.get(name).cloned()) {
                             if let Expr::Var(rn) = init {
@@ -993,6 +1055,9 @@ impl C {
                     Some(idxs) => {
                         if idxs.is_empty() {
                             // Whole-array assignment: name$() = expr
+                            if env.consts.contains(&name.to_ascii_uppercase()) || self.const_globs.contains(&name.to_ascii_uppercase()) {
+                                return Err(BasilError(format!("Cannot assign to constant '{}'", name)));
+                            }
                             self.emit_expr_in(chunk, init, Some(env))?;
                             chunk.push_op(Op::Builtin); chunk.push_u8(138u8); chunk.push_u8(1u8);
                             if let Some(slot) = env.lookup(name) {
@@ -1006,6 +1071,9 @@ impl C {
                             }
                         } else {
                             // array element assignment: load array ref (local or global), push indices, value, ArrSet
+                            if env.consts.contains(&name.to_ascii_uppercase()) || self.const_globs.contains(&name.to_ascii_uppercase()) {
+                                return Err(BasilError(format!("Cannot assign to constant '{}'", name)));
+                            }
                             if let Some(slot) = env.lookup(name) {
                                 chunk.push_op(Op::LoadLocal); chunk.push_u8(slot);
                             } else {
@@ -1270,6 +1338,12 @@ impl C {
             }
             Stmt::SetProp { target, prop, value } => {
                 // push target first
+                if let Expr::Var(nm) = target {
+                    let u = nm.to_ascii_uppercase();
+                    if env.consts.contains(&u) || self.const_globs.contains(&u) {
+                        return Err(BasilError(format!("Cannot assign to constant '{}'", nm)));
+                    }
+                }
                 self.emit_expr_in(chunk, target, Some(env))?;
                 // Determine field coercion
                 let mut coerce_to_int = false;
@@ -1295,6 +1369,13 @@ impl C {
                 chunk.push_op(Op::SetProp); chunk.push_u16(pci);
             }
             Stmt::SetIndexSquare { target, index, value } => {
+                // If target is a variable name, enforce const restrictions
+                if let Expr::Var(nm) = target {
+                    let u = nm.to_ascii_uppercase();
+                    if env.consts.contains(&u) || self.const_globs.contains(&u) {
+                        return Err(BasilError(format!("Cannot assign to constant '{}'", nm)));
+                    }
+                }
                 self.emit_expr_in(chunk, target, Some(env))?;
                 self.emit_expr_in(chunk, index, Some(env))?;
                 self.emit_expr_in(chunk, value, Some(env))?;
@@ -2107,9 +2188,10 @@ struct LocalEnv {
     fixed: HashMap<String, usize>,                 // local fixed-length strings
     var_struct: HashMap<String, String>,           // local struct vars: var -> TypeName (upper)
     var_struct_array: HashMap<String, String>,     // local arrays of struct: var -> ElemTypeName (upper)
+    consts: HashSet<String>,                       // local constants (UPPERCASE)
 }
 impl LocalEnv {
-    fn new() -> Self { Self { map: HashMap::new(), next: 0, fixed: HashMap::new(), var_struct: HashMap::new(), var_struct_array: HashMap::new() } }
+    fn new() -> Self { Self { map: HashMap::new(), next: 0, fixed: HashMap::new(), var_struct: HashMap::new(), var_struct_array: HashMap::new(), consts: HashSet::new() } }
     fn bind(&mut self, name: String, slot: u8) { self.map.insert(name, slot); self.next = self.next.max(slot + 1); }
     fn bind_next_if_absent(&mut self, name: String) -> u8 {
         if let Some(&i) = self.map.get(&name) { return i; }
@@ -2247,14 +2329,34 @@ impl C {
     fn emit_stmt_tl_in_chunk(&mut self, chunk: &mut Chunk, s: &Stmt) -> Result<()> {
         match s {
             Stmt::Declare { .. } => { /* no-op */ },
+            // Handle CONST seen inside top-level blocks (e.g., within BEGIN/END at T/L)
+            Stmt::Const { name, value } => {
+                let uname = name.to_ascii_uppercase();
+                if self.const_globs.contains(&uname) {
+                    return Err(BasilError(format!("Constant '{}' already defined", name)));
+                }
+                if self.gmap.contains_key(name) {
+                    return Err(BasilError(format!("Name '{}' already defined; cannot redeclare as CONST", name)));
+                }
+                self.emit_expr_in(chunk, value, None)?;
+                let g = self.gslot(name);
+                chunk.push_op(Op::StoreGlobal); chunk.push_u8(g);
+                self.const_globs.insert(uname);
+            }
             Stmt::Let { name, indices, init } => {
                 match indices {
                     None => {
+                        if self.const_globs.contains(&name.to_ascii_uppercase()) {
+                            return Err(BasilError(format!("Cannot assign to constant '{}'", name)));
+                        }
                         self.emit_expr_in(chunk, init, None)?;
                         let g = self.gslot(name);
                         chunk.push_op(Op::StoreGlobal); chunk.push_u8(g);
                     }
                     Some(idxs) => {
+                        if self.const_globs.contains(&name.to_ascii_uppercase()) {
+                            return Err(BasilError(format!("Cannot assign to constant '{}'", name)));
+                        }
                         let g = self.gslot(name);
                         chunk.push_op(Op::LoadGlobal); chunk.push_u8(g);
                         for ix in idxs { self.emit_expr_in(chunk, ix, None)?; }

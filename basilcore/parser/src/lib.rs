@@ -450,6 +450,19 @@ impl Parser {
             return Ok(Stmt::Raise(expr_opt));
         }
 
+        // CONST name = expr
+        if self.match_k(TokenKind::Const) {
+            let name = self.expect_ident()?;
+            // Disallow type/object suffixes for constants
+            if name.ends_with('$') || name.ends_with('%') || name.ends_with('@') {
+                return Err(BasilError(format!("parse error at line {}: CONST name cannot have a type suffix ($, %, @)", self.peek_line())));
+            }
+            self.expect(TokenKind::Assign)?;
+            let value = self.parse_expr_bp(0)?;
+            self.terminate_stmt()?;
+            return Ok(Stmt::Const { name, value });
+        }
+
         if self.match_k(TokenKind::Let) {
             // Support two forms:
             // 1) LET name[(indices...)] = expr
@@ -884,6 +897,21 @@ impl Parser {
                 self.terminate_stmt()?;
                 return Ok(Stmt::DimFixedStr { name, len: n });
             }
+            // Multiple simple scalar names: DIM a$, b$, c$
+            if self.check(TokenKind::Comma) {
+                let mut names: Vec<String> = vec![name];
+                while self.match_k(TokenKind::Comma) {
+                    names.push(self.expect_ident()?);
+                }
+                self.terminate_stmt()?;
+                // Desugar into a block of LET defaults
+                let mut stmts: Vec<Stmt> = Vec::new();
+                for n in names {
+                    let init = if n.ends_with('$') { Expr::Str(String::new()) } else { Expr::Number(0.0) };
+                    stmts.push(Stmt::Let { name: n, indices: None, init });
+                }
+                return Ok(Stmt::Block(stmts));
+            }
             if self.match_k(TokenKind::LParen) {
                 let mut dims = Vec::new();
                 if !self.check(TokenKind::RParen) {
@@ -981,7 +1009,10 @@ impl Parser {
                     }
                 }
             } else {
-                return Err(BasilError(format!("parse error at line {}: expected '(' or AS after DIM name", self.peek_line())));
+                // Single simple scalar: DIM name
+                self.terminate_stmt()?;
+                let init = if name.ends_with('$') { Expr::Str(String::new()) } else { Expr::Number(0.0) };
+                return Ok(Stmt::Let { name, indices: None, init });
             }
         }
 
@@ -1086,6 +1117,20 @@ impl Parser {
                     let value = self.parse_expr_bp(0)?;
                     self.terminate_stmt()?;
                     return Ok(Stmt::SetIndexSquare { target: *target, index: *index, value });
+                } else if let Expr::Call { callee, args } = lhs {
+                    if let Expr::Var(name) = *callee {
+                        let _ = self.next(); // consume '='
+                        let value = self.parse_expr_bp(0)?;
+                        self.terminate_stmt()?;
+                        return Ok(Stmt::Let { name, indices: Some(args), init: value });
+                    } else {
+                        return Err(BasilError("Left-hand side of assignment must be a variable or member/index target.".into()));
+                    }
+                } else if let Expr::Var(name) = lhs {
+                    let _ = self.next(); // consume '='
+                    let value = self.parse_expr_bp(0)?;
+                    self.terminate_stmt()?;
+                    return Ok(Stmt::Let { name, indices: None, init: value });
                 } else {
                     return Err(BasilError("Use LET for assignment; '=' in expressions tests equality.".into()));
                 }

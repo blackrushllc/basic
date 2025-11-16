@@ -89,6 +89,43 @@ This build includes two always-available built-in functions intended to help too
 
 Note: In this lean Basic build, the downloader uses a minimal in-process HTTP/1.1 client without external dependencies. HTTPS is not currently supported here and will return code 3. The full Basil distribution may provide HTTPS via optional features.
 
+### Declarations and assignments
+
+This build adds a few quality-of-life language features aligned with Basil:
+
+- CONST declarations (immutable):
+
+  CONST DEFAULT_OS = "L"
+  CONST MAX_RETRIES = 3
+  CONST PI = 3.14159
+
+  Rules:
+  - No type suffix on the name (no $, %, @).
+  - Type is inferred from the literal/expression.
+  - Reassigning a constant is a compile error (e.g., `PI = 3.14` is rejected).
+
+- DIM with multiple variables and defaults:
+
+  DIM a$, b$, c$
+  DIM i%, j%
+  DIM x, y
+
+  Behavior:
+  - String variables default to empty string "".
+  - Integer-suffixed variables default to 0.
+  - Unsuffixed numeric variables default to 0.
+
+- Implicit LET for assignments:
+
+  LET x% = 1
+  x% = 2           ' LET is optional
+  arr%(2) = 7      ' element assignment also works without LET
+  obj.Prop = 3
+
+  Notes:
+  - Function calls like `Foo(1,2)` are not treated as assignments.
+  - Assigning to a CONST (with or without LET) is rejected.
+
 ### Two ways to say the same thing (both valid in Basic/Basil🌿)
 Classic BASIC style:
 

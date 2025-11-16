@@ -79,6 +79,7 @@ pub enum TokenKind {
     Exec, Eval,
     // Declarations
     Declare,
+    Const,
     Eof,
 }
 
@@ -603,6 +604,7 @@ impl<'a> Lexer<'a> {
             "EXEC"   => TokenKind::Exec,
             "EVAL"   => TokenKind::Eval,
             "TYPE"   => TokenKind::Type,
+            "CONST"  => TokenKind::Const,
             _        => TokenKind::Ident,
         };
 

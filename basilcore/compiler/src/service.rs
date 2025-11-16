@@ -60,6 +60,9 @@ fn collect_symbols(ast: &Program, syms: &mut Vec<SymbolInfo>) {
             Stmt::Let { name, .. } => {
                 syms.push(SymbolInfo { name: name.clone(), kind: SymbolKind::Variable, line: 0, col: 0 });
             }
+            Stmt::Const { name, .. } => {
+                syms.push(SymbolInfo { name: name.clone(), kind: SymbolKind::Variable, line: 0, col: 0 });
+            }
             Stmt::Label(lbl) => {
                 syms.push(SymbolInfo { name: lbl.clone(), kind: SymbolKind::Label, line: 0, col: 0 });
             }
