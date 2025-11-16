@@ -50,6 +50,17 @@ pub mod service;
 
 pub fn compile(ast: &Program) -> Result<BCProgram> {
     let mut c = C::new();
+    // Pre-scan top-level constants so function bodies can safely reference them.
+    // This mirrors Basil's behavior: CONST names exist before functions are compiled
+    // and are treated as immutable globals. Also reserve their global slots now so
+    // loads in functions don't create conflicting non-const globals.
+    for s in ast {
+        if let Stmt::Const { name, .. } = s {
+            let uname = name.to_ascii_uppercase();
+            c.const_globs.insert(uname);
+            let _ = c.gslot(name);
+        }
+    }
     // Pre-scan to collect all routine names (FUNC/SUB) with arity and kind so calls can be resolved before definitions
     for s in ast {
         match s {
@@ -179,6 +190,8 @@ struct C {
     var_struct_array_globs: HashMap<String, String>,
     // Constants declared at top level (store as UPPERCASE for CI compare)
     const_globs: HashSet<String>,
+    // Track which CONSTs have been initialized/emitted to catch duplicates
+    const_inited_globs: HashSet<String>,
 }
 
 impl C {
@@ -206,6 +219,7 @@ impl C {
             var_struct_globs: HashMap::new(),
             var_struct_array_globs: HashMap::new(),
             const_globs: HashSet::new(),
+            const_inited_globs: HashSet::new(),
         }
     }
 
@@ -223,19 +237,22 @@ impl C {
             Stmt::Declare { .. } => { /* ignore at codegen */ }
             // CONST at top level: evaluate once and store to a global; mark immutable
             Stmt::Const { name, value } => {
-                // Prevent redefinition
                 let uname = name.to_ascii_uppercase();
-                if self.const_globs.contains(&uname) {
+                // If we've already emitted/initialized this CONST once, it's a duplicate definition.
+                if self.const_inited_globs.contains(&uname) {
                     return Err(BasilError(format!("Constant '{}' already defined", name)));
                 }
-                if self.gmap.contains_key(name) {
+                // If a non-const global of the same name exists (i.e., not predeclared as const), forbid redeclare as CONST.
+                if !self.const_globs.contains(&uname) && self.gmap.contains_key(name) {
                     return Err(BasilError(format!("Name '{}' already defined; cannot redeclare as CONST", name)));
                 }
                 let mut chunk = std::mem::take(&mut self.chunk);
                 self.emit_expr_in(&mut chunk, value, None)?;
                 let g = self.gslot(name);
                 chunk.push_op(Op::StoreGlobal); chunk.push_u8(g);
-                self.const_globs.insert(uname);
+                // Mark as a const (if it wasn't from pre-scan) and as initialized
+                self.const_globs.insert(uname.clone());
+                self.const_inited_globs.insert(uname);
                 self.chunk = chunk;
             }
             // Compile function to a Function value and store into a global.
