@@ -1,14 +1,27 @@
+You are working in a Rust-based BASIC interpreter project.
+There are **two sibling projects** that are almost identical:
+
+* **Basil** (full-featured): interpreter + compiler + web server.
+* **Basic** (stripped-down “naked” BASIC): interpreter only.
+
+This prompt is designed to work in either repo.
+When I run it in one repo, treat *that* repo as the active project and ignore the other.
+
+You are working on our BASIC dialect and its Rust-based cousin Basil.
+
 ### Design: BEGIN-less IF..THEN..ELSE..END IF blocks (implicit IF blocks)
 
-Status: Proposal (not yet implemented). This document describes the minimal, low-risk parser changes to add multi-line IF blocks without requiring BEGIN..END, while preserving all existing forms and the one-line IF/ELSE.
+Status: This document describes the minimal, low-risk parser changes to add multi-line IF blocks without requiring BEGIN..END, while preserving all existing forms and the one-line IF/ELSE.
 
 Goals
 - Support classic BASIC style multi-line IF blocks terminated by END [IF] without requiring BEGIN..END, e.g.:
+``` 
   IF cond THEN
       PRINT "ok"
   ELSE
       PRINT "not ok"
   END IF
+```  
 - Keep backward compatibility: existing { … }, THEN BEGIN … END, and one-line IF forms continue to work.
 - Keep the language newline model unchanged: the lexer already normalizes both newlines and ':' into Semicolon tokens; we will use those for disambiguation.
 
@@ -17,7 +30,7 @@ Non-goals
 - Do not alter runtime semantics or the AST shape for IF; only parsing is extended.
 
 Background (what exists today)
-- Lexer maps END-suffixed keywords like ENDIF, END WHILE, ENDFUNC, etc., to TokenKind::End. No new tokens are needed.
+- Lexer maps END-suffixed keywords like ENDIF, END IF, END WHILE, END FUNC, END SUB etc., to TokenKind::End. No new tokens are needed.
 - Parser has consume_optional_end_suffix() which tolerates optional suffix identifiers after END (e.g., END IF). We re-use it.
 - IF currently supports:
   1) Brace form: IF cond { … } [ELSE { … }]
@@ -57,6 +70,7 @@ Parser touchpoints (basilcore/parser/src/lib.rs)
    - parse_stmt() for nested structures; nested implicit IF/WHILE/FOR will work naturally.
 
 Pseudo-structure (illustrative, not exact code)
+```
   // After parsing IF <expr>
   self.expect(TokenKind::Then)?;
   let mut had_terminator = false;
@@ -113,7 +127,7 @@ Pseudo-structure (illustrative, not exact code)
   } else {
       // Single-statement THEN (existing)
   }
-
+```
 Error handling
 - Unterminated implicit THEN body: "parse error at line <n>: unterminated IF body (expected END)".
 - Unterminated implicit ELSE body: "parse error at line <n>: unterminated ELSE body (expected END)".
@@ -125,12 +139,6 @@ Backward compatibility and precedence
 - Newline or ':' immediately after THEN/ELSE signals a multi-statement implicit block.
 - Colons work like newlines: IF cond THEN: PRINT A: PRINT B: END IF is accepted. Likewise for ELSE: ELSE: PRINT A: END IF.
 - ELSE IF chains are supported transparently by delegating to parse_stmt() after ELSE IF.
-
-Optional rollout toggle
-- To ship conservatively, gate the new implicit IF behavior behind a Cargo feature:
-  - Add cfg(feature = "implicit-if-blocks") around the implicit branches (had_terminator path, and ELSE implicit block path).
-  - Default: feature off, so behavior matches today. Enable in Cargo features or CI to test.
-- Alternatively, add a Parser field implicit_blocks: bool or implicit_if_blocks: bool, defaulted via parse_with_options().
 
 Testing plan (matrix)
 - Happy paths:
@@ -154,27 +162,32 @@ Classic interpreter parity
 
 Examples
 1) BEGIN-less IF with ELSE:
+```
   IF targetDir$ = "" THEN
       PRINT "No target directory specified. Aborting."
       RETURN
   ELSE
       PRINT "ok"
   END IF
-
+```
 2) Colons instead of newlines:
+``` 
   IF ok THEN: PRINT "good": PRINT "still good": ELSE: PRINT "bad": END IF
-
+```
 3) Single-line (unchanged):
-  IF ok THEN PRINT "one-liner" ELSE PRINT "alt"
+```
+IF ok THEN PRINT "one-liner" ELSE PRINT "alt"
+```
 
 4) Mixed nesting:
-  IF outer THEN
+```
+   IF outer THEN
       FOR i = 1 TO 3
           IF i = 2 THEN
               PRINT "two"
           END IF
       NEXT i
   END IF
-
+```
 Implementation effort
 - Changes are localized to the IF arm within parse_stmt(). The code follows the same pattern already used for implicit WHILE and FOR blocks, reducing risk. No changes to the AST or compiler are required.

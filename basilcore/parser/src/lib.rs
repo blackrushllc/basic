@@ -635,13 +635,13 @@ impl Parser {
 
             // Classic forms: require THEN
             self.expect(TokenKind::Then)?;
-            // Allow optional semicolons/newlines before BEGIN
-            while self.match_k(TokenKind::Semicolon) {}
-            // Support both single-statement and block IF forms.
-            // Block form: IF <cond> THEN BEGIN ... [ELSE ...] END
-            // NOTE: We deliberately defer BEGIN-less multi-line IF support (Option B).
-            // See design notes: adding implicit IF blocks introduces ambiguity with the
-            // already-supported single-statement THEN/ELSE. We'll revisit later.
+            // Determine if header is terminated by newline/colon (Semicolon)
+            let mut had_terminator = false;
+            if self.check(TokenKind::Semicolon) {
+                had_terminator = true;
+                while self.match_k(TokenKind::Semicolon) {}
+            }
+            // Precedence: BEGIN -> { } -> implicit (if had terminator) -> single-statement
             if self.match_k(TokenKind::Begin) {
                 // collect THEN block until ELSE or END
                 let mut then_body = Vec::new();
@@ -656,10 +656,81 @@ impl Parser {
                 }
                 let then_s = Box::new(Stmt::Block(then_body));
                 let else_s = if self.match_k(TokenKind::Else) {
-                    // Allow optional semicolons/newlines before BEGIN
+                    // Allow optional semicolons/newlines before forms
                     while self.match_k(TokenKind::Semicolon) {}
-                    // Else can be BEGIN ... END or a single statement before END
-                    if self.match_k(TokenKind::Begin) {
+                    if self.check(TokenKind::If) {
+                        // ELSE IF ...
+                        let s = self.parse_stmt()?;
+                        Some(Box::new(s))
+                    } else if self.match_k(TokenKind::Begin) {
+                        let mut else_body = Vec::new();
+                        loop {
+                            while self.match_k(TokenKind::Semicolon) {}
+                            if self.match_k(TokenKind::End) { self.consume_optional_end_suffix(); break; }
+                            if self.check(TokenKind::Eof) { return Err(BasilError(format!("parse error at line {}: unterminated ELSE BEGIN/END", self.peek_line()))); }
+                            let line = self.peek_line();
+                            let stmt = self.parse_stmt()?;
+                            else_body.push(Stmt::Line(line));
+                            else_body.push(stmt);
+                        }
+                        Some(Box::new(Stmt::Block(else_body)))
+                    } else if self.match_k(TokenKind::LBrace) {
+                        let mut else_body = Vec::new();
+                        loop {
+                            while self.match_k(TokenKind::Semicolon) {}
+                            if self.check(TokenKind::RBrace) { let _ = self.next(); break; }
+                            if self.check(TokenKind::Eof) { return Err(BasilError(format!("parse error at line {}: unterminated ELSE {{ ... }}", self.peek_line()))); }
+                            let line = self.peek_line();
+                            let stmt = self.parse_stmt()?;
+                            else_body.push(Stmt::Line(line));
+                            else_body.push(stmt);
+                        }
+                        Some(Box::new(Stmt::Block(else_body)))
+                    } else {
+                        // Single-statement ELSE, then require END [IF]
+                        let s = self.parse_stmt()?;
+                        while self.match_k(TokenKind::Semicolon) {}
+                        self.expect_end_any()?;
+                        Some(Box::new(s))
+                    }
+                } else {
+                    // No ELSE: require END to close the IF
+                    while self.match_k(TokenKind::Semicolon) {}
+                    self.expect_end_any()?;
+                    None
+                };
+                return Ok(Stmt::If { cond, then_branch: then_s, else_branch: else_s });
+            } else if self.match_k(TokenKind::LBrace) {
+                // THEN { ... } form (treat same as brace form)
+                let mut then_body = Vec::new();
+                loop {
+                    while self.match_k(TokenKind::Semicolon) {}
+                    if self.check(TokenKind::RBrace) { let _ = self.next(); break; }
+                    if self.check(TokenKind::Eof) { return Err(BasilError(format!("parse error at line {}: unterminated IF {{ ... }}", self.peek_line()))); }
+                    let line = self.peek_line();
+                    let stmt = self.parse_stmt()?;
+                    then_body.push(Stmt::Line(line));
+                    then_body.push(stmt);
+                }
+                let then_s = Box::new(Stmt::Block(then_body));
+                let else_s = if self.match_k(TokenKind::Else) {
+                    while self.match_k(TokenKind::Semicolon) {}
+                    if self.check(TokenKind::If) {
+                        let s = self.parse_stmt()?;
+                        Some(Box::new(s))
+                    } else if self.match_k(TokenKind::LBrace) {
+                        let mut else_body = Vec::new();
+                        loop {
+                            while self.match_k(TokenKind::Semicolon) {}
+                            if self.check(TokenKind::RBrace) { let _ = self.next(); break; }
+                            if self.check(TokenKind::Eof) { return Err(BasilError(format!("parse error at line {}: unterminated ELSE {{ ... }}", self.peek_line()))); }
+                            let line = self.peek_line();
+                            let stmt = self.parse_stmt()?;
+                            else_body.push(Stmt::Line(line));
+                            else_body.push(stmt);
+                        }
+                        Some(Box::new(Stmt::Block(else_body)))
+                    } else if self.match_k(TokenKind::Begin) {
                         let mut else_body = Vec::new();
                         loop {
                             while self.match_k(TokenKind::Semicolon) {}
@@ -673,13 +744,87 @@ impl Parser {
                         Some(Box::new(Stmt::Block(else_body)))
                     } else {
                         let s = self.parse_stmt()?;
-                        // After a single-statement ELSE, require END to close the IF
+                        Some(Box::new(s))
+                    }
+                } else { None };
+                return Ok(Stmt::If { cond, then_branch: then_s, else_branch: else_s });
+            } else if had_terminator {
+                // Implicit THEN block until ELSE or END
+                let mut then_body: Vec<Stmt> = Vec::new();
+                loop {
+                    while self.match_k(TokenKind::Semicolon) {}
+                    if self.check(TokenKind::Else) || self.check(TokenKind::End) { break; }
+                    if self.check(TokenKind::Eof) {
+                        return Err(BasilError(format!(
+                            "parse error at line {}: unterminated IF body (expected END)",
+                            self.peek_line()
+                        )));
+                    }
+                    let line = self.peek_line();
+                    then_body.push(Stmt::Line(line));
+                    let s = self.parse_stmt()?;
+                    then_body.push(s);
+                }
+                let then_s = Box::new(Stmt::Block(then_body));
+                let else_s = if self.match_k(TokenKind::Else) {
+                    // ELSE branch precedence
+                    let mut else_had_term = false;
+                    if self.check(TokenKind::Semicolon) { else_had_term = true; while self.match_k(TokenKind::Semicolon) {} }
+                    if self.check(TokenKind::If) {
+                        Some(Box::new(self.parse_stmt()?))
+                    } else if self.match_k(TokenKind::Begin) {
+                        let mut else_body = Vec::new();
+                        loop {
+                            while self.match_k(TokenKind::Semicolon) {}
+                            if self.match_k(TokenKind::End) { self.consume_optional_end_suffix(); break; }
+                            if self.check(TokenKind::Eof) { return Err(BasilError(format!("parse error at line {}: unterminated ELSE BEGIN/END", self.peek_line()))); }
+                            let line = self.peek_line();
+                            let stmt = self.parse_stmt()?;
+                            else_body.push(Stmt::Line(line));
+                            else_body.push(stmt);
+                        }
+                        Some(Box::new(Stmt::Block(else_body)))
+                    } else if self.match_k(TokenKind::LBrace) {
+                        let mut else_body = Vec::new();
+                        loop {
+                            while self.match_k(TokenKind::Semicolon) {}
+                            if self.check(TokenKind::RBrace) { let _ = self.next(); break; }
+                            if self.check(TokenKind::Eof) { return Err(BasilError(format!("parse error at line {}: unterminated ELSE {{ ... }}", self.peek_line()))); }
+                            let line = self.peek_line();
+                            let stmt = self.parse_stmt()?;
+                            else_body.push(Stmt::Line(line));
+                            else_body.push(stmt);
+                        }
+                        Some(Box::new(Stmt::Block(else_body)))
+                    } else if else_had_term {
+                        // Implicit ELSE block until END [IF]
+                        let mut else_body: Vec<Stmt> = Vec::new();
+                        loop {
+                            while self.match_k(TokenKind::Semicolon) {}
+                            if self.check(TokenKind::End) { break; }
+                            if self.check(TokenKind::Eof) {
+                                return Err(BasilError(format!(
+                                    "parse error at line {}: unterminated ELSE body (expected END)",
+                                    self.peek_line()
+                                )));
+                            }
+                            let line = self.peek_line();
+                            else_body.push(Stmt::Line(line));
+                            let s = self.parse_stmt()?;
+                            else_body.push(s);
+                        }
+                        // consume END [IF]
+                        self.expect_end_any()?;
+                        Some(Box::new(Stmt::Block(else_body)))
+                    } else {
+                        // Single-statement ELSE, then require END [IF]
+                        let s = self.parse_stmt()?;
                         while self.match_k(TokenKind::Semicolon) {}
                         self.expect_end_any()?;
                         Some(Box::new(s))
                     }
                 } else {
-                    // No ELSE: require END to close the IF
+                    // No ELSE: consume END [IF]
                     while self.match_k(TokenKind::Semicolon) {}
                     self.expect_end_any()?;
                     None
