@@ -9,6 +9,7 @@ use basil_bytecode::Value;
 use basil_vm::VM;
 
 use crate::template::{precompile_template, Directives};
+use crate::preprocess;
 use basil_bytecode::{serialize_program, deserialize_program};
 use std::time::UNIX_EPOCH;
 
@@ -46,6 +47,11 @@ impl Session {
         } else {
             crate::template::PrecompileResult { basil_source: src.clone(), directives: Directives::default() }
         };
+        // Preprocess
+        let flags = crate::PRE_FLAGS.get().cloned().unwrap_or_default();
+        let pre_opts = preprocess::build_pre_opts_for_file(&PathBuf::from(path), &flags);
+        let pre_flat = preprocess::preprocess_text(&PathBuf::from(path), &pre.basil_source, pre_opts)
+            .map_err(|e| format!("{}", e))?;
         let meta = fs::metadata(path).map_err(|e| format!("stat {}: {}", path, e))?;
         let source_size = meta.len();
         let source_mtime_ns: u64 = meta.modified().ok()
@@ -72,7 +78,7 @@ impl Session {
             }
         }
         let program = if let Some(p) = program_opt { p } else {
-            let ast = parse(&pre.basil_source).map_err(|e| format!("parse error: {}", e))?;
+            let ast = parse(&pre_flat.text).map_err(|e| format!("parse error: {}", e))?;
             let prog = compile(&ast).map_err(|e| format!("compile error: {}", e))?;
             let body = serialize_program(&prog);
             let mut hdr = Vec::with_capacity(32 + body.len());

@@ -54,18 +54,88 @@ use basil_vm::debug::Debugger;
 use basil_lexer::Lexer; // add this near the other use lines
 use basil_bytecode::{serialize_program, deserialize_program};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::OnceLock;
 
 mod template;
 mod repl;
 use template::{precompile_template, parse_directives_and_bom, Directives};
 mod embedded;
+mod preprocess;
+
+// --- Preprocessor CLI flags (global for simplicity) ---
+#[derive(Debug, Default, Clone)]
+pub struct PreFlags {
+    pub include_paths: Vec<PathBuf>,
+    pub defines: HashMap<String, preprocess::MacroValue>,
+    pub no_embedded: bool,
+}
+
+pub(crate) static PRE_FLAGS: OnceLock<PreFlags> = OnceLock::new();
+pub static VERSION_MAJOR: AtomicUsize = AtomicUsize::new(0);
+
+fn parse_pre_flags(args: &mut Vec<String>) -> PreFlags {
+    let mut include_paths: Vec<PathBuf> = Vec::new();
+    let mut defines: HashMap<String, preprocess::MacroValue> = HashMap::new();
+    let mut no_embedded = false;
+
+    let mut i = 0usize;
+    while i < args.len() {
+        let a = &args[i];
+        if a == "-I" || a == "--include-path" {
+            if i + 1 >= args.len() { eprintln!("-I/--include-path requires a path"); std::process::exit(2); }
+            include_paths.push(PathBuf::from(args.remove(i+1)));
+            let _ = args.remove(i); // remove flag
+            continue;
+        } else if a.starts_with("-I") && a.len() > 2 {
+            include_paths.push(PathBuf::from(a[2..].to_string()));
+            let _ = args.remove(i);
+            continue;
+        } else if a == "--D" {
+            if i + 1 >= args.len() { eprintln!("--D requires NAME or NAME=VALUE"); std::process::exit(2); }
+            parse_define_flag(&args[i+1], &mut defines);
+            args.remove(i+1); args.remove(i);
+            continue;
+        } else if a.starts_with("--D") && a.len() > 3 {
+            parse_define_flag(&a[3..], &mut defines);
+            let _ = args.remove(i);
+            continue;
+        } else if a == "--no-embedded-includes" {
+            no_embedded = true; args.remove(i); continue;
+        }
+        i += 1;
+    }
+
+    PreFlags { include_paths, defines, no_embedded }
+}
+
+fn parse_define_flag(spec: &str, out: &mut HashMap<String, preprocess::MacroValue>) {
+    if let Some((name, val)) = spec.split_once('=') {
+        if let Ok(i) = val.parse::<i64>() { out.insert(name.to_string(), preprocess::MacroValue::Int(i)); return; }
+        if (val.starts_with('"') && val.ends_with('"')) || (val.starts_with('\'') && val.ends_with('\'')) {
+            let s = val.trim_matches('"').trim_matches('\'').to_string();
+            out.insert(name.to_string(), preprocess::MacroValue::Str(s));
+        } else {
+            out.insert(name.to_string(), preprocess::MacroValue::Str(val.to_string()));
+        }
+    } else {
+        let name = spec; out.insert(name.to_string(), preprocess::MacroValue::Bool(true));
+    }
+}
 
 fn cmd_analyze(path: String, json: bool) {
     let src = match std::fs::read_to_string(&path) {
         Ok(s) => s,
         Err(e) => { eprintln!("read {}: {}", path, e); std::process::exit(1); }
     };
-    let diags: CompilerDiagnostics = analyze_source(&src, &path);
+    // Preprocess
+    let flags = PRE_FLAGS.get().cloned().unwrap_or_default();
+    let pre_opts = preprocess::build_pre_opts_for_file(Path::new(&path), &flags);
+    let pre = match preprocess::preprocess_text(Path::new(&path), &src, pre_opts) {
+        Ok(r) => r,
+        Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+    };
+    let diags: CompilerDiagnostics = analyze_source(&pre.text, &path);
     if json {
         eprintln!("--json output not available in lean build; showing plain text instead.\n");
     }
@@ -92,8 +162,12 @@ fn cmd_debug(path: Option<String>) {
     };
     let abs_path: PathBuf = match fs::canonicalize(&input_path) { Ok(p)=>p, Err(_)=>PathBuf::from(&input_path) };
     let src = match std::fs::read_to_string(&abs_path) { Ok(s)=>s, Err(e)=>{ eprintln!("{}", e); std::process::exit(1);} };
-    let pre = template::PrecompileResult { basil_source: src.clone(), directives: Directives::default() };
-    let ast = match parse(&pre.basil_source) { Ok(a)=>a, Err(e)=>{ eprintln!("parse error: {}", e); std::process::exit(1);} };
+    // Template precompile, then preprocess
+    let pre_tpl = template::PrecompileResult { basil_source: src.clone(), directives: Directives::default() };
+    let flags = PRE_FLAGS.get().cloned().unwrap_or_default();
+    let pre_opts = preprocess::build_pre_opts_for_file(&abs_path, &flags);
+    let pre = match preprocess::preprocess_text(&abs_path, &pre_tpl.basil_source, pre_opts) { Ok(r)=>r, Err(e)=>{ eprintln!("{}", e); std::process::exit(1)} };
+    let ast = match parse(&pre.text) { Ok(a)=>a, Err(e)=>{ eprintln!("parse error: {}", e); std::process::exit(1);} };
     let program = match compile(&ast) { Ok(p)=>p, Err(e)=>{ eprintln!("compile error: {}", e); std::process::exit(1);} };
     let dbg = Debugger::new();
     let mut vm = VM::new(program);
@@ -150,11 +224,16 @@ fn print_help() {
     println!("");
     println!("Usage:");
     println!("  basic <command> [args]\n");
+    println!("Preprocessor flags (may appear before or after the command):");
+    println!("  -I, --include-path <dir>   Add include search path (repeatable)");
+    println!("  --D NAME[=VALUE]           Predefine a macro (bool if no value; int or string)");
+    println!("  --no-embedded-includes     Disable looking up embedded library includes");
+    println!("");
     println!("Examples:");
     println!("  basic make examples");
     println!("  basic make examples/hello.bas");
-    println!("  basic run examples/hello.bas");
-    println!("  basic lex examples/hello.bas");
+    println!("  basic -I lib --D DEBUG=1 run examples/hello.bas");
+    println!("  basic --no-embedded-includes lex examples/hello.bas");
     println!("  basic make upgrade");
     println!("  basic make --list");
     println!("");
@@ -237,7 +316,11 @@ fn cmd_init(target: Option<String>) -> io::Result<()> {
 fn cmd_lex(path: Option<String>) {
     let Some(path) = path else { eprintln!("usage: basic lex <file.bas>"); std::process::exit(2) };
     let src = std::fs::read_to_string(&path).expect("read file");
-    let mut lx = Lexer::new(&src);
+    // Preprocess
+    let flags = PRE_FLAGS.get().cloned().unwrap_or_default();
+    let pre_opts = preprocess::build_pre_opts_for_file(Path::new(&path), &flags);
+    let pre = match preprocess::preprocess_text(Path::new(&path), &src, pre_opts) { Ok(r)=>r, Err(e)=>{ eprintln!("{}", e); std::process::exit(1) } };
+    let mut lx = Lexer::new(&pre.text);
     match lx.tokenize() {
         Ok(toks) => {
             for t in toks {
@@ -309,6 +392,11 @@ fn cmd_run(path: Option<String>) {
         template::PrecompileResult { basil_source: src.clone(), directives: Directives::default() }
     };
 
+    // Preprocess directives/includes
+    let flags = PRE_FLAGS.get().cloned().unwrap_or_default();
+    let pre_opts = preprocess::build_pre_opts_for_file(&abs_path, &flags);
+    let pre_flat = match preprocess::preprocess_text(&abs_path, &pre.basil_source, pre_opts) { Ok(r)=>r, Err(e)=>{ eprintln!("{}", e); std::process::exit(1) } };
+
     // Prepare cache fingerprint
     let meta = match fs::metadata(&abs_path) { Ok(m)=>m, Err(e)=>{ eprintln!("stat {}: {}", abs_path.display(), e); std::process::exit(1);} };
     let source_size = meta.len();
@@ -342,8 +430,8 @@ fn cmd_run(path: Option<String>) {
     }
 
     let program = if let Some(p) = program_opt { p } else {
-        // Parse → compile the precompiled Basil source
-        let ast = match parse(&pre.basil_source) { Ok(a)=>a, Err(e)=>{ eprintln!("parse error: {}", e); std::process::exit(1);} };
+        // Parse → compile the preprocessed Basil source
+        let ast = match parse(&pre_flat.text) { Ok(a)=>a, Err(e)=>{ eprintln!("parse error: {}", e); std::process::exit(1);} };
         let prog = match compile(&ast) { Ok(p)=>p, Err(e)=>{ eprintln!("compile error: {}", e); std::process::exit(1);} };
         // Write cache atomically
         let body = serialize_program(&prog);
@@ -393,6 +481,9 @@ fn is_cgi_invocation() -> bool {
 fn cli_main() {
     // === BEGIN: your old main() body ===
     let mut args = env::args().skip(1).collect::<Vec<_>>();
+    // Parse preprocessor flags early and store globally
+    let pf = parse_pre_flags(&mut args);
+    let _ = PRE_FLAGS.set(pf);
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
         print_help();
         let path = args.get(0).cloned();
@@ -649,6 +740,10 @@ fn resolve_script_path() -> Option<String> {
 /// --- New: tiny dispatcher ---
 
 fn main() {
+    // Initialize version major for preprocessor built-in __version__
+    let ver_str = env!("CARGO_PKG_VERSION");
+    let major: usize = ver_str.split('.').next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    VERSION_MAJOR.store(major, Ordering::Relaxed);
     // Explicit escape hatch for any subprocess we spawn:
     if env::var("BASIL_FORCE_MODE").ok().as_deref() == Some("cli") {
         cli_main();
@@ -785,6 +880,10 @@ fn cmd_test(mut args: Vec<String>) {
     } else {
         template::PrecompileResult { basil_source: src.clone(), directives: Directives::default() }
     };
+    // Preprocess
+    let flags = PRE_FLAGS.get().cloned().unwrap_or_default();
+    let pre_opts = preprocess::build_pre_opts_for_file(Path::new(&path), &flags);
+    let pre_flat = match preprocess::preprocess_text(Path::new(&path), &pre.basil_source, pre_opts) { Ok(r)=>r, Err(e)=>{ eprintln!("{}", e); std::process::exit(1) } };
 
     // Cache path and fingerprint like cmd_run
     let meta = match fs::metadata(&path) { Ok(m)=>m, Err(e)=>{ eprintln!("stat {}: {}", path, e); std::process::exit(1);} };
@@ -815,7 +914,7 @@ fn cmd_test(mut args: Vec<String>) {
         }
     }
     let program = if let Some(p) = program_opt { p } else {
-        let ast = match parse(&pre.basil_source) { Ok(a)=>a, Err(e)=>{ eprintln!("parse error: {}", e); std::process::exit(1);} };
+        let ast = match parse(&pre_flat.text) { Ok(a)=>a, Err(e)=>{ eprintln!("parse error: {}", e); std::process::exit(1);} };
         match compile(&ast) { Ok(p)=>{
             let body = serialize_program(&p);
             let mut hdr = Vec::with_capacity(32 + body.len());
@@ -832,7 +931,7 @@ fn cmd_test(mut args: Vec<String>) {
         }, Err(e)=>{ eprintln!("compile error: {}", e); std::process::exit(1)} }
     };
 
-    let comments_map = extract_comments_map(&pre.basil_source);
+    let comments_map = extract_comments_map(&pre_flat.text);
     let seed: u64 = seed_opt.unwrap_or_else(|| {
         std::time::SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|d| d.as_nanos() as u64).unwrap_or(0)
     });
