@@ -52,6 +52,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 // Note: Write trait is already imported via `use std::io::{self, Write, Read, Seek, SeekFrom};` above.
+use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+use windows_sys::Win32::Foundation::SYSTEMTIME;
 
 // Helper: blocking HTTP download with error mapping
 // Return codes:
@@ -1853,6 +1855,199 @@ impl VM {
                                     } else {
                                         self.stack.push(Value::Int(0));
                                     }
+                                }
+                            }
+                        }
+                        // --- New string/collection/time builtins ---
+                        141 => { // REMOVE$(hay$, needle$)
+                            if argc != 2 { return Err(BasilError("REMOVE$ expects 2 arguments".into())); }
+                            let hay = match &args[0] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("REMOVE$ arg 1 must be string".into())) };
+                            let needle = match &args[1] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("REMOVE$ arg 2 must be string".into())) };
+                            if needle.is_empty() { self.stack.push(Value::Str(hay)); }
+                            else { self.stack.push(Value::Str(hay.replace(&needle, ""))); }
+                        }
+                        142 => { // REPLACE$(needle$, new$, hay$)
+                            if argc != 3 { return Err(BasilError("REPLACE$ expects 3 arguments".into())); }
+                            let needle = match &args[0] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("REPLACE$ arg 1 (needle$) must be string".into())) };
+                            let newv   = match &args[1] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("REPLACE$ arg 2 (new$) must be string".into())) };
+                            let hay    = match &args[2] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("REPLACE$ arg 3 (hay$) must be string".into())) };
+                            if needle.is_empty() { self.stack.push(Value::Str(hay)); }
+                            else { self.stack.push(Value::Str(hay.replace(&needle, &newv))); }
+                        }
+                        143 => { // INSERT$(hay$, ins$, pos%)
+                            if argc != 3 { return Err(BasilError("INSERT$ expects 3 arguments".into())); }
+                            let hay = match &args[0] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("INSERT$ arg 1 must be string".into())) };
+                            let ins = match &args[1] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("INSERT$ arg 2 must be string".into())) };
+                            let pos_i = self.to_i64(&args[2])?; // truncates if Num
+                            let nchars = hay.chars().count() as i64;
+                            let idx0_char: i64 = if pos_i <= 0 { 0 } else if pos_i >= nchars + 1 { nchars } else { pos_i - 1 };
+                            // convert char index to byte index
+                            let mut byte_idx: usize = 0;
+                            if idx0_char <= 0 {
+                                byte_idx = 0;
+                            } else if idx0_char as usize >= hay.chars().count() {
+                                byte_idx = hay.len();
+                            } else {
+                                let mut seen = 0i64;
+                                for (b, _) in hay.char_indices() {
+                                    if seen == idx0_char { byte_idx = b; break; }
+                                    seen += 1;
+                                    byte_idx = hay.len();
+                                }
+                            }
+                            let mut out = String::with_capacity(hay.len() + ins.len());
+                            let (left, right) = hay.split_at(byte_idx);
+                            out.push_str(left);
+                            out.push_str(&ins);
+                            out.push_str(right);
+                            self.stack.push(Value::Str(out));
+                        }
+                        144 => { // DATE$()
+                            if argc != 0 { return Err(BasilError("DATE$ expects 0 arguments".into())); }
+                            let mut pushed = false;
+                            if let Ok(ts) = env::var("BASIL_TEST_TIME") {
+                                // Accept forms like YYYY-MM-DD or full "YYYY-MM-DD HH:MM:SS"/RFC3339; we only need date
+                                if ts.len() >= 10 {
+                                    let ymd = &ts[0..10];
+                                    self.stack.push(Value::Str(ymd.to_string()));
+                                    pushed = true;
+                                }
+                            }
+                            if !pushed {
+                                unsafe {
+                                    let mut st = SYSTEMTIME { wYear: 0, wMonth: 0, wDayOfWeek: 0, wDay: 0, wHour: 0, wMinute: 0, wSecond: 0, wMilliseconds: 0 };
+                                    GetLocalTime(&mut st);
+                                    let s = format!("{:04}-{:02}-{:02}", st.wYear, st.wMonth, st.wDay);
+                                    self.stack.push(Value::Str(s));
+                                }
+                            }
+                        }
+                        145 => { // TIME$()
+                            if argc != 0 { return Err(BasilError("TIME$ expects 0 arguments".into())); }
+                            let mut pushed = false;
+                            if let Ok(ts) = env::var("BASIL_TEST_TIME") {
+                                // Accept forms with time at positions 11..19 or 0..8
+                                if ts.len() >= 19 {
+                                    let hms = &ts[11..19];
+                                    self.stack.push(Value::Str(hms.to_string()));
+                                    pushed = true;
+                                } else if ts.len() >= 8 {
+                                    let hms = &ts[0..8];
+                                    if hms.chars().nth(2) == Some(':') { self.stack.push(Value::Str(hms.to_string())); pushed = true; }
+                                }
+                            }
+                            if !pushed {
+                                unsafe {
+                                    let mut st = SYSTEMTIME { wYear: 0, wMonth: 0, wDayOfWeek: 0, wDay: 0, wHour: 0, wMinute: 0, wSecond: 0, wMilliseconds: 0 };
+                                    GetLocalTime(&mut st);
+                                    let s = format!("{:02}:{:02}:{:02}", st.wHour, st.wMinute, st.wSecond);
+                                    self.stack.push(Value::Str(s));
+                                }
+                            }
+                        }
+                        146 => { // NOW$()
+                            if argc != 0 { return Err(BasilError("NOW$ expects 0 arguments".into())); }
+                            let mut pushed = false;
+                            if let Ok(ts) = env::var("BASIL_TEST_TIME") {
+                                // Accept full date-time (RFC3339-like) or already space-separated
+                                if ts.len() >= 19 {
+                                    let date = &ts[0..10];
+                                    let time = &ts[11..19];
+                                    self.stack.push(Value::Str(format!("{} {}", date, time)));
+                                    pushed = true;
+                                }
+                            }
+                            if !pushed {
+                                unsafe {
+                                    let mut st = SYSTEMTIME { wYear: 0, wMonth: 0, wDayOfWeek: 0, wDay: 0, wHour: 0, wMinute: 0, wSecond: 0, wMilliseconds: 0 };
+                                    GetLocalTime(&mut st);
+                                    let s = format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+                                    self.stack.push(Value::Str(s));
+                                }
+                            }
+                        }
+                        147 => { // EXPLODE(...)
+                            if !(argc == 2 || argc == 3) { return Err(BasilError("EXPLODE expects 2 or 3 arguments".into())); }
+                            if argc == 2 {
+                                let src = match &args[0] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("EXPLODE arg 1 must be string".into())) };
+                                let delim = match &args[1] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("EXPLODE arg 2 must be string".into())) };
+                                if delim.is_empty() { return Err(BasilError("EXPLODE: delimiter must not be empty".into())); }
+                                let items: Vec<Value> = src.split(&delim).map(|t| Value::Str(t.to_string())).collect();
+                                let rc = Rc::new(std::cell::RefCell::new(items));
+                                self.stack.push(Value::List(rc));
+                            } else {
+                                let src = match &args[0] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("EXPLODE arg 1 must be string".into())) };
+                                let pair_delim = match &args[1] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("EXPLODE arg 2 must be string".into())) };
+                                let kv_delim = match &args[2] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("EXPLODE arg 3 must be string".into())) };
+                                if pair_delim.is_empty() || kv_delim.is_empty() { return Err(BasilError("EXPLODE: delimiter must not be empty".into())); }
+                                let mut map: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+                                for part in src.split(&pair_delim) {
+                                    let mut it = part.splitn(2, &kv_delim);
+                                    let k = it.next().unwrap_or("");
+                                    let v = it.next().unwrap_or("");
+                                    map.insert(k.to_string(), Value::Str(v.to_string()));
+                                }
+                                self.stack.push(Value::Dict(Rc::new(std::cell::RefCell::new(map))));
+                            }
+                        }
+                        148 => { // IMPLODE$(var, delim1$ [,delim2$])
+                            if !(argc == 2 || argc == 3) { return Err(BasilError("IMPLODE$ expects 2 or 3 arguments".into())); }
+                            let delim1 = match &args[1] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("IMPLODE$ arg 2 (delim1$) must be string".into())) };
+                            let delim2_opt: Option<String> = if argc == 3 { match &args[2] { Value::Str(s)=>Some(s.clone()), _ => return Err(BasilError("IMPLODE$ arg 3 (delim2$) must be string".into())) } } else { None };
+                            match &args[0] {
+                                Value::List(rc) => {
+                                    if argc != 2 { return Err(BasilError("IMPLODE$: list expects 2 arguments (var, delim1$)".into())); }
+                                    let v = rc.borrow();
+                                    let parts: Vec<String> = v.iter().map(|x| format!("{}", x)).collect();
+                                    self.stack.push(Value::Str(parts.join(&delim1)));
+                                }
+                                Value::Array(arr_rc) => {
+                                    let arr = arr_rc.as_ref();
+                                    if arr.dims.len() == 1 {
+                                        if argc != 2 { return Err(BasilError("IMPLODE$: 1-D array expects 2 arguments (var, delim1$)".into())); }
+                                        let data = arr.data.borrow();
+                                        let parts: Vec<String> = data.iter().map(|x| format!("{}", x)).collect();
+                                        self.stack.push(Value::Str(parts.join(&delim1)));
+                                    } else if arr.dims.len() == 2 {
+                                        if arr.dims[1] != 2 { return Err(BasilError("IMPLODE$: array must be 1-D or 2-D (2 columns)".into())); }
+                                        let delim2 = delim2_opt.clone().ok_or_else(|| BasilError("IMPLODE$: 2-D array expects 3 arguments (var, delim1$, delim2$)".into()))?;
+                                        let rows = arr.dims[0];
+                                        let cols = arr.dims[1];
+                                        let data = arr.data.borrow();
+                                        let mut pairs: Vec<String> = Vec::with_capacity(rows);
+                                        for r in 0..rows {
+                                            let k = &data[r*cols + 0];
+                                            let v = &data[r*cols + 1];
+                                            let kv = format!("{}{}{}", k, delim2, v);
+                                            pairs.push(kv);
+                                        }
+                                        self.stack.push(Value::Str(pairs.join(&delim1)));
+                                    } else {
+                                        return Err(BasilError("IMPLODE$: array must be 1-D or 2-D (2 columns)".into()));
+                                    }
+                                }
+                                Value::Dict(rc) => {
+                                    let delim2 = delim2_opt.clone().ok_or_else(|| BasilError("IMPLODE$: dict expects 3 arguments (var, delim1$, delim2$)".into()))?;
+                                    let m = rc.borrow();
+                                    let mut parts: Vec<String> = Vec::with_capacity(m.len());
+                                    for (k, v) in m.iter() {
+                                        parts.push(format!("{}{}{}", k, delim2, v));
+                                    }
+                                    self.stack.push(Value::Str(parts.join(&delim1)));
+                                }
+                                Value::StrArray2D { rows, cols, data } => {
+                                    if *cols != 2 { return Err(BasilError("IMPLODE$: array must be 1-D or 2-D (2 columns)".into())); }
+                                    let delim2 = delim2_opt.clone().ok_or_else(|| BasilError("IMPLODE$: 2-D array expects 3 arguments (var, delim1$, delim2$)".into()))?;
+                                    let mut pairs: Vec<String> = Vec::with_capacity(*rows);
+                                    for r in 0..*rows {
+                                        let k = &data[r*(*cols) + 0];
+                                        let v = &data[r*(*cols) + 1];
+                                        pairs.push(format!("{}{}{}", k, delim2, v));
+                                    }
+                                    self.stack.push(Value::Str(pairs.join(&delim1)));
+                                }
+                                other => {
+                                    return Err(BasilError(format!("IMPLODE$: unsupported type {}", self.type_of(other))));
                                 }
                             }
                         }

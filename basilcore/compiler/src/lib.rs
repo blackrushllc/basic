@@ -1907,6 +1907,15 @@ impl C {
                         "UNESCAPE$" => Some(21u8),
                         "URLENCODE$" => Some(22u8),
                         "URLDECODE$" => Some(23u8),
+                        // --- New string/collection/time builtins ---
+                        "REMOVE$" => Some(141u8),
+                        "REPLACE$" => Some(142u8),
+                        "INSERT$" => Some(143u8),
+                        "DATE$" => Some(144u8),
+                        "TIME$" => Some(145u8),
+                        "NOW$"  => Some(146u8),
+                        "EXPLODE" => Some(147u8),
+                        "IMPLODE$" => Some(148u8),
                         "STRING$" => Some(26u8),
                         "SLEEP" => Some(24u8),
                         // --- Math builtins ---

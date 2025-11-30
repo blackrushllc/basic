@@ -668,17 +668,28 @@ impl<'a> Lexer<'a> {
                     }
                 }
 
-                // BASIC-style REM comment (case-insensitive): skip 'REM' and rest of line
+                // BASIC-style REM comment (case-insensitive): only when 'REM' is a standalone keyword
+                // I.e., the next character after 'REM' must be absent or not an identifier-continue char
                 Some('R') | Some('r') => {
                     let mut it = self.chars.clone();
-                    let n1 = it.next();
-                    let n2 = it.next();
+                    let n1 = it.next(); // char after 'R'
+                    let n2 = it.next(); // char after 'RE'
                     if matches!(n1, Some('E') | Some('e')) && matches!(n2, Some('M') | Some('m')) {
-                        // consume R E M
-                        self.advance(); self.advance(); self.advance();
-                        while let Some(ch) = self.cur {
-                            if ch == '\n' { break; }
-                            self.advance();
+                        let n3 = it.next(); // char after 'REM'
+                        let is_standalone = match n3 {
+                            None => true,
+                            Some(c) => c.is_whitespace() || !is_ident_continue(c),
+                        };
+                        if is_standalone {
+                            // consume R E M and rest of line
+                            self.advance(); self.advance(); self.advance();
+                            while let Some(ch) = self.cur {
+                                if ch == '\n' { break; }
+                                self.advance();
+                            }
+                            continue;
+                        } else {
+                            break;
                         }
                     } else {
                         break;

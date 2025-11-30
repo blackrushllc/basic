@@ -1,5 +1,5 @@
 ### Overview
-This report specifies how to add the following functions to the BASIC interpreter (Basil) in a way that is consistent with the current architecture and language surface:
+This task description specifies how to add the following functions to the BASIC interpreter (Basil) in a way that is consistent with the current architecture and language surface:
 
 - `REMOVE$(hay$, needle$)`
 - `REPLACE$(needle$, new$, hay$)`

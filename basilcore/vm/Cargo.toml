@@ -10,6 +10,7 @@ basil-bytecode = { workspace = true }
 basil-parser = { workspace = true }
 basil-compiler = { workspace = true }
 crossterm = "0.27"
+windows-sys = { version = "0.48.0", features = ["Win32_System_SystemInformation", "Win32_Foundation"] }
 
 [features]
 # Declare all feature flags referenced by cfg in the code so rustc check-cfg recognizes them.
