@@ -46,3 +46,20 @@ REM (Note: array-returning alias forms like EXPLODE$[]/EXPLODE2D$[] are not adde
 REM IMPLODE$
 PRINTLN IMPLODE$(items@, ",")                  REM list -> string
 PRINTLN IMPLODE$(params@, "&", "=")           REM dict -> query string
+
+REM print a multi-line string
+PRINT "Hello
+World"
+
+REM print a string with escaped quotes
+PRINT "Hello \"World\""
+
+REM print a multi-line string with interpolation
+LET name$ = "Alice"
+PRINTLN "Hello, {name$}!
+Welcome to the Basil programming language."
+
+REM print a multi-line string with single quotes
+print 'Hello,
+"World"'
+

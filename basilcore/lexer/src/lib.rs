@@ -220,6 +220,7 @@ impl<'a> Lexer<'a> {
             }
 
             '"' => self.string()?,
+            '\'' => self.string_single()?,
             c if c.is_ascii_digit() => self.number()?,
             c if is_ident_start(c)  => self.ident_or_kw()?,
             _ => return Err(BasilError(format!("unexpected char '{}': pos {}", ch, self.pos))),
@@ -499,6 +500,65 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    // Single-quoted string literal: no interpolation; only \' escapes to '\''; everything else is literal.
+    fn string_single(&mut self) -> Result<Token> {
+        let tok_line = self.tok_line as u32;
+        let outer_start = self.start;
+        // position just AFTER opening single quote
+        let content_start = self.pos;
+        // step into first character
+        self.advance();
+        // scan until unescaped closing single quote. Treat \' as escaped quote; other backslashes do not escape.
+        let content_end = loop {
+            let ch = match self.cur { Some(c) => c, None => return Err(BasilError(format!("parse error at line {}: unterminated string", tok_line))) };
+            if ch == '\'' {
+                // end excludes the closing quote
+                let end = self.pos - '\'' .len_utf8();
+                self.advance();
+                break end;
+            }
+            if ch == '\\' {
+                // If next char is a single quote, skip it so it doesn't terminate
+                let next = self.peek();
+                self.advance(); // consume '\\'
+                if let Some('\'') = next { self.advance(); } // consume escaped quote
+                continue;
+            }
+            self.advance();
+        };
+
+        let raw = &self.src[content_start..content_end];
+        // Decode only \' to '\''; everything else stays as-is.
+        let mut out = String::new();
+        let mut i = 0usize;
+        while i < raw.len() {
+            let (ci, ch) = {
+                let mut it = raw[i..].char_indices();
+                let (off, c) = it.next().unwrap();
+                (i + off, c)
+            };
+            if ch == '\\' {
+                // lookahead
+                let mut it = raw[ci + ch.len_utf8()..].char_indices();
+                if let Some((off2, c2)) = it.next() {
+                    if c2 == '\'' {
+                        out.push('\'');
+                        i = ci + ch.len_utf8() + off2 + c2.len_utf8();
+                        continue;
+                    }
+                }
+                // not an escaped quote: keep the backslash literally
+                out.push('\\');
+                i = ci + ch.len_utf8();
+                continue;
+            }
+            out.push(ch);
+            i = ci + ch.len_utf8();
+        }
+
+        Ok(Token { kind: TokenKind::String, lexeme: out.clone(), literal: Some(Literal::Str(out)), span: Span::new(outer_start, self.pos), line: tok_line })
+    }
+
 
     fn number(&mut self) -> Result<Token> {
         let start = self.start;
@@ -638,14 +698,6 @@ impl<'a> Lexer<'a> {
                         if !suppress { self.pending_nl_semi = true; }
                     }
                     self.advance();
-                }
-
-                // BASIC-style single-quote comment
-                Some('\'') => {
-                    while let Some(ch) = self.cur {
-                        if ch == '\n' { break; }
-                        self.advance();
-                    }
                 }
 
                 // C++-style line comment: //

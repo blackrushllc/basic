@@ -25,7 +25,7 @@ fn basilc_test_mode_basic() {
     let mut p = env::temp_dir();
     p.push(format!("testmode_{}.bas", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
     let src_path = p;
-    let program = r#"' Ask for confirmation
+    let program = r#"REM Ask for confirmation
 PRINT "Are you sure? (Y/N)";
 LET A$ = INPUT$("> ");
 PRINT A$;
