@@ -32,5 +32,5 @@ mixed@[len(mixed@)+1] = "five"
 mixed@[len(mixed@)+1] = "six"
 
 for i%=1 to len(mixed@)
-println mixed@[i%], " "
+print mixed@[i%], " "
 next
