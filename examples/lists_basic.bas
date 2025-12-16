@@ -1,0 +1,36 @@
+DIM a% = [1,2,3]
+
+PRINTLN a%(1), ", ", a%(2), ", ", a%(3)
+
+for i%=1 to len(a%)
+    a%[i%] = a%[i%] + 1
+    a%(i%) = a%(i%) + 1
+    println a%(i%), " "
+next
+
+DIM mixed@ = [1, "two", 3.0]
+PRINTLN mixed@[2]
+LET mixed@[2] = "TWO"
+PRINTLN mixed@[2]
+PRINTLN "len mixed = ", LEN(mixed@)
+
+lm%=len(mixed@)
+la%=len(a%)
+
+println "Mixed length is #{lm%}, array length is #{la%}"
+
+FOR i%=1 TO 3
+    PRINTLN mixed@[i%], " "
+NEXT
+
+FOR i%=1 TO lm%
+    PRINTLN mixed@[i%], " "
+NEXT
+
+mixed@[lm%+1] = "four"
+mixed@[len(mixed@)+1] = "five"
+mixed@[len(mixed@)+1] = "six"
+
+for i%=1 to len(mixed@)
+println mixed@[i%], " "
+next

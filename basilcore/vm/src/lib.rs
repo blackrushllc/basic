@@ -1265,8 +1265,11 @@ impl VM {
                     let arr_rc = match arr_v { Value::Array(rc) => rc, _ => return Err(BasilError("array access on non-array or not DIMed".into())) };
                     let arr = arr_rc.as_ref();
                     if idxs.len() != arr.dims.len() { return Err(BasilError("array rank mismatch".into())); }
-                    for (dim_len, idx) in arr.dims.iter().zip(&idxs) {
-                        if *idx < 0 || (*idx as usize) >= *dim_len { return Err(BasilError("array index out of bounds".into())); }
+                    // Convert external 1-based to internal 0-based and bounds-check
+                    for (i, dim_len) in arr.dims.iter().copied().enumerate() {
+                        let idx1 = idxs[i];
+                        if idx1 <= 0 || (idx1 as usize) > dim_len { return Err(BasilError("array index out of bounds".into())); }
+                        idxs[i] = idx1 - 1; // to 0-based
                     }
                     // compute linear index (row-major)
                     let mut lin: usize = 0;
@@ -1294,8 +1297,11 @@ impl VM {
                     let arr_rc = match arr_v { Value::Array(rc) => rc, _ => return Err(BasilError("array write on non-array or not DIMed".into())) };
                     let arr = arr_rc.as_ref();
                     if idxs.len() != arr.dims.len() { return Err(BasilError("array rank mismatch".into())); }
-                    for (dim_len, idx) in arr.dims.iter().zip(&idxs) {
-                        if *idx < 0 || (*idx as usize) >= *dim_len { return Err(BasilError("array index out of bounds".into())); }
+                    // Convert external 1-based to internal 0-based and bounds-check
+                    for (i, dim_len) in arr.dims.iter().copied().enumerate() {
+                        let idx1 = idxs[i];
+                        if idx1 <= 0 || (idx1 as usize) > dim_len { return Err(BasilError("array index out of bounds".into())); }
+                        idxs[i] = idx1 - 1; // to 0-based
                     }
                     let mut lin: usize = 0;
                     let mut stride: usize = 1;
@@ -3310,7 +3316,19 @@ impl VM {
                                     if let Some(v) = m.get(&key) { self.stack.push(v.clone()); }
                                     else { return Err(BasilError(format!("Dictionary missing key: \"{}\"", key))); }
                                 }
-                                _ => { return Err(BasilError("Attempted [] on a non-list/dict value.".into())); }
+                                Value::Array(arr_rc) => {
+                                    // Support [] for 1-D arrays, 1-based external indexing
+                                    let arr = arr_rc.as_ref();
+                                    if arr.dims.len() != 1 { return Err(BasilError("[] indexing is only supported for 1-D arrays; use () for multi-dimensional arrays.".into())); }
+                                    let idx1 = self.to_i64(index)?;
+                                    if idx1 <= 0 { return Err(BasilError(format!("Array index out of bounds: {}", idx1))); }
+                                    let idx0 = (idx1 - 1) as usize;
+                                    let len = arr.dims[0];
+                                    if idx0 >= len { return Err(BasilError(format!("Array index out of bounds: {}", idx1))); }
+                                    let val = arr.data.borrow()[idx0].clone();
+                                    self.stack.push(val);
+                                }
+                                _ => { return Err(BasilError("Attempted [] on a non-list/dict/array value.".into())); }
                             }
                         }
                         254 => { // INDEX SET: obj[idx] = value
@@ -3324,8 +3342,13 @@ impl VM {
                                     if idx <= 0 { return Err(BasilError(format!("List index out of range: {}", idx))); }
                                     let idx0 = (idx - 1) as usize;
                                     let mut v = rc.borrow_mut();
-                                    if idx0 >= v.len() { return Err(BasilError(format!("List index out of range: {}", idx))); }
-                                    v[idx0] = value;
+                                    if idx0 >= v.len() {
+                                        // Auto-extend with Null gap-fill up to idx0
+                                        while v.len() < idx0 { v.push(Value::Null); }
+                                        v.push(value);
+                                    } else {
+                                        v[idx0] = value;
+                                    }
                                     self.stack.push(Value::Null);
                                 }
                                 Value::Dict(rc) => {
@@ -3333,7 +3356,38 @@ impl VM {
                                     rc.borrow_mut().insert(key, value);
                                     self.stack.push(Value::Null);
                                 }
-                                _ => { return Err(BasilError("Attempted [] on a non-list/dict value.".into())); }
+                                Value::Array(arr_rc) => {
+                                    // 1-D arrays only; 1-based external indexing; no auto-extend
+                                    let arr = arr_rc.as_ref();
+                                    if arr.dims.len() != 1 { return Err(BasilError("[] indexing is only supported for 1-D arrays; use () for multi-dimensional arrays.".into())); }
+                                    let idx1 = self.to_i64(index)?;
+                                    if idx1 <= 0 { return Err(BasilError(format!("Array index out of bounds: {}", idx1))); }
+                                    let idx0 = (idx1 - 1) as usize;
+                                    let len = arr.dims[0];
+                                    if idx0 >= len { return Err(BasilError(format!("Array index out of bounds: {}", idx1))); }
+                                    // Coerce to element type as in ArrSet
+                                    let coerced = match &arr.elem {
+                                        ElemType::Num => match value { Value::Num(n)=>Value::Num(n), Value::Int(i)=>Value::Num(i as f64), other=>return Err(BasilError(format!("cannot store non-numeric {:?} into numeric array", other))) },
+                                        ElemType::Int => match value { Value::Int(i)=>Value::Int(i), Value::Num(n)=>Value::Int(n.trunc() as i64), other=>return Err(BasilError(format!("cannot store non-numeric {:?} into integer array", other))) },
+                                        ElemType::Str => match value { Value::Str(s)=>Value::Str(s), other=>Value::Str(format!("{}", other)) },
+                                        ElemType::Obj(Some(tname)) => match value {
+                                            Value::Object(rc) => {
+                                                let got = rc.borrow().type_name().to_string();
+                                                if got.eq_ignore_ascii_case(tname) { Value::Object(rc) }
+                                                else { return Err(BasilError(format!("Expected {} in typed object array, got {}.", tname, got))); }
+                                            }
+                                            Value::Null => Value::Null,
+                                            other => return Err(BasilError(format!("cannot store non-object {:?} into typed OBJECT[] array", other))),
+                                        },
+                                        ElemType::Obj(None) => match value {
+                                            Value::Object(_) | Value::Null => value,
+                                            other => return Err(BasilError(format!("cannot store non-object {:?} into OBJECT[] array", other))),
+                                        },
+                                    };
+                                    arr.data.borrow_mut()[idx0] = coerced;
+                                    self.stack.push(Value::Null);
+                                }
+                                _ => { return Err(BasilError("Attempted [] on a non-list/dict/array value.".into())); }
                             }
                         }
                         _ => return Err(BasilError(format!("unknown builtin id {}", bid))),

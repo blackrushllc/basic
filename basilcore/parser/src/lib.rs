@@ -72,6 +72,64 @@ impl Parser {
         // Skip any leading semicolons (useful with newline-as-semicolon)
         while self.match_k(TokenKind::Semicolon) {}
 
+        // --- Shorthand sugars on bare identifiers ---
+        // Support: name += expr | name -= expr | name++ | name--
+        // Also: name@ += { ... } (dict merge) and name@ += value (list append)
+        if self.check(TokenKind::Ident) {
+            let save_i = self.i;
+            let name = self.expect_ident()?;
+            // name += ...
+            if self.match_k(TokenKind::Plus) {
+                if self.match_k(TokenKind::Assign) {
+                    // parse RHS
+                    let rhs = self.parse_expr_bp(0)?;
+                    self.terminate_stmt()?;
+                    if name.ends_with('@') {
+                        // dict merge if RHS is dict literal; else list append
+                        match rhs {
+                            Expr::Dict(entries) => {
+                                let mut stmts: Vec<Stmt> = Vec::new();
+                                for (k, v) in entries {
+                                    stmts.push(Stmt::SetIndexSquare { target: Expr::Var(name.clone()), index: Expr::Str(k), value: v });
+                                }
+                                return Ok(Stmt::Block(stmts));
+                            }
+                            other => {
+                                // list append sugar: name@[] = rhs
+                                let len_call = Expr::Call { callee: Box::new(Expr::Var("LEN".to_string())), args: vec![Expr::Var(name.clone())] };
+                                let idx = Expr::Binary { op: BinOp::Add, lhs: Box::new(len_call), rhs: Box::new(Expr::Number(1.0)) };
+                                return Ok(Stmt::SetIndexSquare { target: Expr::Var(name), index: idx, value: other });
+                            }
+                        }
+                    } else {
+                        // numeric/string +=
+                        let init = Expr::Binary { op: BinOp::Add, lhs: Box::new(Expr::Var(name.clone())), rhs: Box::new(rhs) };
+                        return Ok(Stmt::Let { name, indices: None, init });
+                    }
+                } else if self.match_k(TokenKind::Plus) {
+                    // name++
+                    self.terminate_stmt()?;
+                    let init = Expr::Binary { op: BinOp::Add, lhs: Box::new(Expr::Var(name.clone())), rhs: Box::new(Expr::Number(1.0)) };
+                    return Ok(Stmt::Let { name, indices: None, init });
+                }
+            } else if self.match_k(TokenKind::Minus) {
+                if self.match_k(TokenKind::Assign) {
+                    let rhs = self.parse_expr_bp(0)?;
+                    self.terminate_stmt()?;
+                    // numeric -=
+                    let init = Expr::Binary { op: BinOp::Sub, lhs: Box::new(Expr::Var(name.clone())), rhs: Box::new(rhs) };
+                    return Ok(Stmt::Let { name, indices: None, init });
+                } else if self.match_k(TokenKind::Minus) {
+                    // name--
+                    self.terminate_stmt()?;
+                    let init = Expr::Binary { op: BinOp::Sub, lhs: Box::new(Expr::Var(name.clone())), rhs: Box::new(Expr::Number(1.0)) };
+                    return Ok(Stmt::Let { name, indices: None, init });
+                }
+            }
+            // Not a shorthand; rewind
+            self.i = save_i;
+        }
+
         // SELECT CASE <expr> ... END [SELECT]
         if self.match_k(TokenKind::Select) {
             self.expect(TokenKind::Case)?;
@@ -486,12 +544,22 @@ impl Parser {
             let name = self.expect_ident()?;
             // Optional square-bracket indexing for list/dict: LET name '[' expr ']' = value
             if self.match_k(TokenKind::LBracket) {
-                let idx = self.parse_expr_bp(0)?;
-                self.expect(TokenKind::RBracket)?;
-                self.expect(TokenKind::Assign)?;
-                let value = self.parse_expr_bp(0)?;
-                self.terminate_stmt()?;
-                return Ok(Stmt::SetIndexSquare { target: Expr::Var(name), index: idx, value });
+                // Allow empty [] sugar for append
+                if self.match_k(TokenKind::RBracket) {
+                    self.expect(TokenKind::Assign)?;
+                    let value = self.parse_expr_bp(0)?;
+                    self.terminate_stmt()?;
+                    let len_call = Expr::Call { callee: Box::new(Expr::Var("LEN".to_string())), args: vec![Expr::Var(name.clone())] };
+                    let idx = Expr::Binary { op: BinOp::Add, lhs: Box::new(len_call), rhs: Box::new(Expr::Number(1.0)) };
+                    return Ok(Stmt::SetIndexSquare { target: Expr::Var(name), index: idx, value });
+                } else {
+                    let idx = self.parse_expr_bp(0)?;
+                    self.expect(TokenKind::RBracket)?;
+                    self.expect(TokenKind::Assign)?;
+                    let value = self.parse_expr_bp(0)?;
+                    self.terminate_stmt()?;
+                    return Ok(Stmt::SetIndexSquare { target: Expr::Var(name), index: idx, value });
+                }
             }
             // Optional indices for array element assignment: name '(' exprlist ')'
             let indices = if self.match_k(TokenKind::LParen) {
@@ -1295,6 +1363,11 @@ impl Parser {
                     continue;
                 }
                 if self.match_k(TokenKind::LBracket) {
+                    // Support empty [] in statement position only via earlier sugar; here require an index expr
+                    // If immediate ']' encountered, treat as parse error to avoid confusing expression contexts
+                    if self.check(TokenKind::RBracket) {
+                        return Err(BasilError("Empty [] is only valid in assignment context as an append sugar.".into()));
+                    }
                     let idx = self.parse_expr_bp(0)?;
                     self.expect(TokenKind::RBracket)?;
                     lhs = Expr::IndexSquare { target: Box::new(lhs), index: Box::new(idx) };
@@ -1334,6 +1407,34 @@ impl Parser {
                     return Ok(Stmt::Let { name, indices: None, init: value });
                 } else {
                     return Err(BasilError("Use LET for assignment; '=' in expressions tests equality.".into()));
+                }
+            }
+            // Disallow compound ops on non-bare targets like a[i] += 1 (parsed as '+' then '=')
+            if self.check(TokenKind::Plus) || self.check(TokenKind::Minus) {
+                if let Some(t2) = self.tokens.get(self.i + 1) {
+                    if t2.kind == TokenKind::Assign {
+                        // Only bare identifiers are allowed for compound ops
+                        if !matches!(lhs, Expr::Var(_)) {
+                            return Err(BasilError("Compound operators (+=, -=, ++, --) are only allowed on variables. Use explicit assignment for elements, e.g., a[i] = a[i] + 1.".into()));
+                        }
+                    }
+                }
+            }
+            // Also handle append sugar without LET: name[] = expr
+            // Detect pattern: Ident '[' ']' '=' expr
+            if let Expr::Var(var_name) = &lhs {
+                let after_lhs = self.i;
+                if self.match_k(TokenKind::LBracket) {
+                    if self.match_k(TokenKind::RBracket) && self.match_k(TokenKind::Assign) {
+                        let value = self.parse_expr_bp(0)?;
+                        self.terminate_stmt()?;
+                        let len_call = Expr::Call { callee: Box::new(Expr::Var("LEN".to_string())), args: vec![Expr::Var(var_name.clone())] };
+                        let idx = Expr::Binary { op: BinOp::Add, lhs: Box::new(len_call), rhs: Box::new(Expr::Number(1.0)) };
+                        return Ok(Stmt::SetIndexSquare { target: Expr::Var(var_name.clone()), index: idx, value });
+                    } else {
+                        // rewind if not actually the sugar pattern
+                        self.i = after_lhs;
+                    }
                 }
             }
             // Not an assignment pattern; reset before parsing general expression
