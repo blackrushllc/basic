@@ -85,3 +85,25 @@ fn implicit_let_assignment_scalar_and_index() {
     // We don't have a direct getter for array element here; ensure the global exists and is an array by Describe? For now, just ensure name exists.
     assert!(get_global_idx(&names2, "arr%").is_some());
 }
+
+#[test]
+fn mod_operator_behavior() {
+    let src = r#"
+        LET a = 10 MOD 3
+        LET b = 10 % 3
+        LET c = 10
+        MOD 3
+        LET d = 10
+        % 3
+    "#;
+    let (names, vals) = run(src);
+    let val_a = match vals[get_global_idx(&names, "a").expect("a")] { Value::Num(n) => n, Value::Int(i) => i as f64, _ => panic!("a not num") };
+    let val_b = match vals[get_global_idx(&names, "b").expect("b")] { Value::Num(n) => n, Value::Int(i) => i as f64, _ => panic!("b not num") };
+    let val_c = match vals[get_global_idx(&names, "c").expect("c")] { Value::Num(n) => n, Value::Int(i) => i as f64, _ => panic!("c not num") };
+    let val_d = match vals[get_global_idx(&names, "d").expect("d")] { Value::Num(n) => n, Value::Int(i) => i as f64, _ => panic!("d not num") };
+
+    assert_eq!(val_a, 1.0);
+    assert_eq!(val_b, 1.0);
+    assert_eq!(val_c, 1.0);
+    assert_eq!(val_d, 1.0);
+}

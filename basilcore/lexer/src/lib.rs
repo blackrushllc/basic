@@ -194,6 +194,7 @@ impl<'a> Lexer<'a> {
             '-' => { let tok = self.make(TokenKind::Minus);     self.advance(); tok }
             '*' => { let tok = self.make(TokenKind::Star);      self.advance(); tok }
             '/' => { let tok = self.make(TokenKind::Slash);     self.advance(); tok }
+            '%' => { let tok = self.make(TokenKind::Mod);       self.advance(); tok }
             '.' => { let tok = self.make(TokenKind::Dot);       self.advance(); tok }
 
             // --- two-char possibilities: keep existing logic ---
@@ -258,10 +259,25 @@ impl<'a> Lexer<'a> {
                 '\'' => return false,
                 '/' => {
                     if let Some('/') = it.clone().next() { return false; }
-                    return matches!(ch, '+' | '-' | '*' | '/' | '.' | ',');
+                    return true;
                 }
                 '#' => return false,
-                '+' | '-' | '*' | '.' | ',' => return true,
+                '+' | '-' | '*' | '.' | ',' | '%' | '=' | '<' | '>' | '!' => return true,
+                c if c.is_ascii_alphabetic() || c == '_' => {
+                    // Collect word to check for keywords
+                    let mut word = String::new();
+                    word.push(c);
+                    let mut it2 = it.clone();
+                    while let Some(c2) = it2.next() {
+                        if is_ident_continue(c2) {
+                            word.push(c2);
+                        } else {
+                            break;
+                        }
+                    }
+                    let upper = word.to_ascii_uppercase();
+                    return matches!(upper.as_str(), "MOD" | "AND" | "OR" | "TO" | "STEP");
+                }
                 _ => return false,
             }
         }
