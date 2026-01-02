@@ -1,5 +1,5 @@
-' upgrade.bas
-' Interactive upgrader / installer for BASIC or BASIL components.
+// upgrade.bas
+// Interactive upgrader / installer for BASIC or BASIL components.
 
 CONST OS_WINDOWS = "W"
 CONST OS_LINUX   = "L"
@@ -322,5 +322,5 @@ FUNCTION QuotePath$(s$) AS STRING
 END FUNCTION
 
 
-' --- Program entry point ---
+// --- Program entry point ---
 CALL Main()
