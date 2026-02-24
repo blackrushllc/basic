@@ -938,9 +938,15 @@ fn cmd_test(mut args: Vec<String>) {
     let mock = MockInputProvider::new(seed);
     let mut vm = VM::new_with_test(program, mock, trace, Some(path.clone()), Some(comments_map), max_inputs);
     if let Err(e) = vm.run() {
-        let line = vm.current_line();
-        if line > 0 { eprintln!("runtime error at line {}: {}", line, e); }
-        else { eprintln!("runtime error: {}", e); }
+        let raw_line = vm.current_line();
+        let fname = std::path::Path::new(&path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&path)
+            .to_string();
+        let ln = if raw_line > 0 { raw_line } else { 0 };
+        if ln > 0 { eprintln!("runtime error at line {} in {}: {}", ln, fname, e); }
+        else { eprintln!("runtime error in {}: {}", fname, e); }
         std::process::exit(1);
     }
 }

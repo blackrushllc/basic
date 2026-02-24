@@ -6,13 +6,6 @@
 > ### This is what professionals should learn.
 > ### This is the only programming language you need.
 
->
-> Invite link to Blackrush Slack (Never Expires)
->
-> https://join.slack.com/t/blackrushworkspace/shared_invite/zt-3g33s1rxc-9wWmCfggBEzInblqjzsn1A
->
-> Join the Blackrush Slack Community for daily builds, discussions, lols
->
 
 This BASIC interpreter and compiler is a subset of Basil🌿
 

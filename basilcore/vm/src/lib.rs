@@ -2057,6 +2057,13 @@ impl VM {
                                 }
                             }
                         }
+                        156 => { // SPLIT$(src$ [, delim$]) -> array of strings
+                            if !(argc == 1 || argc == 2) { return Err(BasilError("SPLIT$ expects 1 or 2 arguments".into())); }
+                            let src = match &args[0] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("SPLIT$ arg 1 (src$) must be string".into())) };
+                            let delim = if argc == 2 { match &args[1] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("SPLIT$ arg 2 (delim$) must be string".into())) } } else { ",".to_string() };
+                            let items: Vec<String> = if delim.is_empty() { vec![src] } else { src.split(&delim).map(|t| t.to_string()).collect() };
+                            self.stack.push(VM::make_string_array(items));
+                        }
                         6 => { // INPUT$([prompt])
                             if !(argc == 0 || argc == 1) { return Err(BasilError("INPUT$ expects 0 or 1 argument".into())); }
                             if argc == 1 {
@@ -2318,6 +2325,11 @@ impl VM {
                             std::thread::sleep(std::time::Duration::from_millis(msu));
                             self.stack.push(Value::Int(0));
                         }
+                        25 => { // STR$(x)
+                            if argc != 1 { return Err(BasilError("STR$ expects 1 argument".into())); }
+                            let s = format!("{}", args[0]);
+                            self.stack.push(Value::Str(s));
+                        }
                         26 => { // STRING$(n, ch$ or code%)
                             if argc != 2 { return Err(BasilError("STRING$ expects 2 arguments".into())); }
                             let n = self.to_i64(&args[0])?;
@@ -2332,6 +2344,15 @@ impl VM {
                             };
                             let out = if unit.is_empty() || n == 0 { String::new() } else { unit.repeat(n) };
                             self.stack.push(Value::Str(out));
+                        }
+                        27 => { // VAL(s$)
+                            if argc != 1 { return Err(BasilError("VAL expects 1 argument".into())); }
+                            let s = match &args[0] { Value::Str(st)=>st.clone(), other=>format!("{}", other) };
+                            let t = s.trim();
+                            if t.is_empty() { self.stack.push(Value::Num(0.0)); }
+                            else if let Ok(i) = t.parse::<i64>() { self.stack.push(Value::Num(i as f64)); }
+                            else if let Ok(f) = t.parse::<f64>() { self.stack.push(Value::Num(f)); }
+                            else { self.stack.push(Value::Num(0.0)); }
                         }
                         40 => { // FOPEN(path$, mode$) -> fh%
                             if argc != 2 { return Err(BasilError("FOPEN expects 2 arguments".into())); }
