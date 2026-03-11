@@ -413,6 +413,8 @@ struct Frame {
     chunk: Rc<Chunk>,
     ip: usize,
     base: usize,
+    gosub_base: usize,
+    handler_base: usize,
 }
 
 struct ArrEnum {
@@ -471,10 +473,12 @@ pub struct VM {
     // GOSUB stack and safety cap
     gosub_stack: Vec<usize>,
     gosub_max_depth: usize,
+    gosub_base: usize,
     // Optional debugger
     pub debugger: Option<Arc<debug::Debugger>>,
     // Exceptions
     _handlers: Vec<HandlerEntry>,
+    handler_base: usize,
     current_exception: Option<String>,
     // Struct type descriptor registry
     struct_types: HashMap<String, VMTypeDesc>,
@@ -553,7 +557,7 @@ impl basil_bytecode::BasicObject for ClassInstance {
         // Prepare stack: place arguments starting at base 0
         for a in args { vm.stack.push(a.clone()); }
         // Push frame directly
-        let frame = Frame { chunk: f.chunk.clone(), ip: 0, base: 0 };
+        let frame = Frame { chunk: f.chunk.clone(), ip: 0, base: 0, gosub_base: 0, handler_base: 0 };
         vm.frames.push(frame);
         vm.run()?;
         // Capture back persistent file handles into this instance
@@ -594,7 +598,7 @@ impl VM {
     pub fn new(p: BCProgram) -> Self {
         let globals = vec![Value::Null; p.globals.len()];
         let top_chunk = Rc::new(p.chunk);
-        let frame = Frame { chunk: top_chunk, ip: 0, base: 0 };
+        let frame = Frame { chunk: top_chunk, ip: 0, base: 0, gosub_base: 0, handler_base: 0 };
         let mut registry = Registry::new();
         register_objects(&mut registry);
         #[allow(unused_mut)]
@@ -622,8 +626,10 @@ impl VM {
             close_handles_on_ret: true,
             gosub_stack: Vec::new(),
             gosub_max_depth: 4096,
+            gosub_base: 0,
             debugger: None,
             _handlers: Vec::new(),
+            handler_base: 0,
             current_exception: None,
             struct_types: HashMap::new(),
             out_col: 0,
@@ -1068,11 +1074,17 @@ impl VM {
                     self.cur().ip -= off;
                 }
                 Op::GosubRet => {
-                    let ret_ip = match self.gosub_stack.pop() { Some(ip) => ip, None => return Err(BasilError("RETURN without GOSUB".into())) };
+                    if self.gosub_stack.len() <= self.gosub_base {
+                        return Err(BasilError("RETURN without GOSUB".into()));
+                    }
+                    let ret_ip = self.gosub_stack.pop().expect("checked above");
                     self.cur().ip = ret_ip;
                 }
                 Op::GosubPop => {
-                    if self.gosub_stack.pop().is_none() { return Err(BasilError("RETURN without GOSUB".into())); }
+                    if self.gosub_stack.len() <= self.gosub_base {
+                        return Err(BasilError("RETURN without GOSUB".into()));
+                    }
+                    self.gosub_stack.pop();
                     // continue execution; typically followed by a Jump to a label
                 }
                 Op::TryPush => {
@@ -1091,7 +1103,8 @@ impl VM {
                     // Pop message, convert to string, then transfer to nearest handler or abort
                     let msg_v = self.pop()?;
                     let msg = format!("{}", msg_v);
-                    if let Some(h) = self._handlers.last() {
+                    if self._handlers.len() > self.handler_base {
+                        let h = self._handlers.last().unwrap();
                         // record message and jump to handler; also make it available on stack
                         self.current_exception = Some(msg.clone());
                         self.stack.push(Value::Str(msg));
@@ -1104,9 +1117,13 @@ impl VM {
                 Op::Reraise => {
                     // rethrow current exception to next outer handler
                     let msg = match self.current_exception.clone() { Some(m) => m, None => return Err(BasilError("Reraise without active exception".into())) };
+                    if self._handlers.len() <= self.handler_base {
+                        return Err(BasilError(msg));
+                    }
                     // Pop current handler if any
                     let _ = self._handlers.pop();
-                    if let Some(h) = self._handlers.last() {
+                    if self._handlers.len() > self.handler_base {
+                        let h = self._handlers.last().unwrap();
                         self.stack.push(Value::Str(msg));
                         let target = h.handler_ip;
                         self.cur().ip = target;
@@ -1133,7 +1150,15 @@ impl VM {
                             if f.arity as usize != argc {
                                 return Err(BasilError(format!("arity mismatch: expected {}, got {}", f.arity, argc)));
                             }
-                            let frame = Frame { chunk: f.chunk.clone(), ip: 0, base };
+                            let frame = Frame { 
+                                chunk: f.chunk.clone(), 
+                                ip: 0, 
+                                base, 
+                                gosub_base: self.gosub_base,
+                                handler_base: self.handler_base,
+                            };
+                            self.gosub_base = self.gosub_stack.len();
+                            self.handler_base = self._handlers.len();
                             self.frames.push(frame);
                         }
                         _ => return Err(BasilError("CALL target is not a function".into())),
@@ -1167,6 +1192,8 @@ impl VM {
                     let retv = self.pop().unwrap_or(Value::Null);
                     let depth = self.frames.len();
                     let frame = self.frames.pop().ok_or_else(|| BasilError("RET with no frame".into()))?;
+                    self.gosub_base = frame.gosub_base;
+                    self.handler_base = frame.handler_base;
                     self.stack.truncate(frame.base);
                     self.stack.push(retv);
                     // auto-close any file handles opened in this frame (unless suppressed for class methods)
@@ -2057,12 +2084,44 @@ impl VM {
                                 }
                             }
                         }
-                        156 => { // SPLIT$(src$ [, delim$]) -> array of strings
+                        156 => { // SPLIT$(src$ [, delim$]) -> List of strings
                             if !(argc == 1 || argc == 2) { return Err(BasilError("SPLIT$ expects 1 or 2 arguments".into())); }
                             let src = match &args[0] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("SPLIT$ arg 1 (src$) must be string".into())) };
                             let delim = if argc == 2 { match &args[1] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("SPLIT$ arg 2 (delim$) must be string".into())) } } else { ",".to_string() };
-                            let items: Vec<String> = if delim.is_empty() { vec![src] } else { src.split(&delim).map(|t| t.to_string()).collect() };
-                            self.stack.push(VM::make_string_array(items));
+                            let items: Vec<Value> = if delim.is_empty() { vec![Value::Str(src)] } else { src.split(&delim).map(|t| Value::Str(t.to_string())).collect() };
+                            self.stack.push(Value::List(Rc::new(std::cell::RefCell::new(items))));
+                        }
+                        157 => { // RENDER$(template$, context)
+                            if argc != 2 { return Err(BasilError("RENDER$ expects 2 arguments".into())); }
+                            let template = match &args[0] { Value::Str(s)=>s.clone(), _ => return Err(BasilError("RENDER$ arg 1 must be string".into())) };
+                            let context = &args[1];
+                            let mut result = String::new();
+                            let mut i = 0;
+                            let chars: Vec<char> = template.chars().collect();
+                            while i < chars.len() {
+                                if chars[i] == '#' && i + 1 < chars.len() && chars[i+1] == '{' {
+                                    let mut j = i + 2;
+                                    let mut found = false;
+                                    while j < chars.len() {
+                                        if chars[j] == '}' { found = true; break; }
+                                        j += 1;
+                                    }
+                                    if found {
+                                        let key: String = chars[i+2..j].iter().collect();
+                                        let val = match context {
+                                            Value::Dict(m) => m.borrow().get(&key).cloned().unwrap_or(Value::Null),
+                                            Value::Object(o) => o.borrow().get_prop(&key).unwrap_or(Value::Null),
+                                            _ => Value::Null,
+                                        };
+                                        result.push_str(&format!("{}", val));
+                                        i = j + 1;
+                                        continue;
+                                    }
+                                }
+                                result.push(chars[i]);
+                                i += 1;
+                            }
+                            self.stack.push(Value::Str(result));
                         }
                         6 => { // INPUT$([prompt])
                             if !(argc == 0 || argc == 1) { return Err(BasilError("INPUT$ expects 0 or 1 argument".into())); }
@@ -2327,7 +2386,22 @@ impl VM {
                         }
                         25 => { // STR$(x)
                             if argc != 1 { return Err(BasilError("STR$ expects 1 argument".into())); }
-                            let s = format!("{}", args[0]);
+                            let s = match &args[0] {
+                                Value::Bool(b) => if *b { "TRUE".to_string() } else { "FALSE".to_string() },
+                                Value::Num(n) => {
+                                    if n.is_nan() { "NaN".to_string() }
+                                    else if n.is_infinite() { if n.is_sign_negative() { "-Infinity".to_string() } else { "Infinity".to_string() } }
+                                    else {
+                                        let s = format!("{:.10}", n);
+                                        let mut s = s.trim_end_matches('0').trim_end_matches('.').to_string();
+                                        if s == "-0" { s = "0".to_string(); }
+                                        s
+                                    }
+                                }
+                                Value::Int(i) => i.to_string(),
+                                Value::Null => "null".to_string(),
+                                other => format!("{}", other),
+                            };
                             self.stack.push(Value::Str(s));
                         }
                         26 => { // STRING$(n, ch$ or code%)
@@ -2350,9 +2424,34 @@ impl VM {
                             let s = match &args[0] { Value::Str(st)=>st.clone(), other=>format!("{}", other) };
                             let t = s.trim();
                             if t.is_empty() { self.stack.push(Value::Num(0.0)); }
-                            else if let Ok(i) = t.parse::<i64>() { self.stack.push(Value::Num(i as f64)); }
-                            else if let Ok(f) = t.parse::<f64>() { self.stack.push(Value::Num(f)); }
-                            else { self.stack.push(Value::Num(0.0)); }
+                            else {
+                                let tu = t.to_uppercase();
+                                if tu.starts_with("&H") {
+                                    let hex = &t[2..];
+                                    match i64::from_str_radix(hex, 16) {
+                                        Ok(i) => self.stack.push(Value::Int(i)),
+                                        Err(_) => self.stack.push(Value::Num(0.0)),
+                                    }
+                                } else if tu.starts_with("&B") {
+                                    let bin = &t[2..];
+                                    match i64::from_str_radix(bin, 2) {
+                                        Ok(i) => self.stack.push(Value::Int(i)),
+                                        Err(_) => self.stack.push(Value::Num(0.0)),
+                                    }
+                                } else if tu.starts_with("&O") {
+                                    let oct = &t[2..];
+                                    match i64::from_str_radix(oct, 8) {
+                                        Ok(i) => self.stack.push(Value::Int(i)),
+                                        Err(_) => self.stack.push(Value::Num(0.0)),
+                                    }
+                                } else if let Ok(i) = t.parse::<i64>() {
+                                    self.stack.push(Value::Int(i));
+                                } else if let Ok(f) = t.parse::<f64>() {
+                                    self.stack.push(Value::Num(f));
+                                } else {
+                                    self.stack.push(Value::Num(0.0));
+                                }
+                            }
                         }
                         40 => { // FOPEN(path$, mode$) -> fh%
                             if argc != 2 { return Err(BasilError("FOPEN expects 2 arguments".into())); }
@@ -3661,14 +3760,16 @@ impl VM {
         }
         for b in bases {
             if b.extension().is_none() {
+                out.push(b.with_extension("basilx"));
                 out.push(b.with_extension("bas"));
                 out.push(b.with_extension("basx"));
             } else {
                 let ext = b.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-                if ext == "basx" {
+                if ext == "basilx" || ext == "basx" {
                     out.push(b.clone());
                 } else if ext == "bas" {
                     out.push(b.clone());
+                    out.push(b.with_extension("basilx"));
                     out.push(b.with_extension("basx"));
                 } else {
                     out.push(b.clone());
@@ -3686,7 +3787,7 @@ impl VM {
             let exists = fs::metadata(&cand).is_ok();
             if !exists { continue; }
             let ext = cand.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-            if ext == "basx" {
+            if ext == "basilx" || ext == "basx" {
                 let bytes = fs::read(&cand).map_err(|e| BasilError(format!("Failed to read {}: {}", cand.display(), e)))?;
                 let prog = deserialize_program(&bytes).map_err(|_| BasilError("Bad .basx file".into()))?;
                 return Ok((prog, cand.to_string_lossy().to_string()));

@@ -220,7 +220,10 @@ impl<'a> Lexer<'a> {
                 else { self.make(TokenKind::Gt) }
             }
 
-            '"' => self.string()?,
+            '"' => {
+                let is_triple = self.peek() == Some('"') && self.chars.clone().nth(1) == Some('"');
+                self.string(is_triple)?
+            }
             '\'' => self.string_single()?,
             c if c.is_ascii_digit() => self.number()?,
             c if is_ident_start(c)  => self.ident_or_kw()?,
@@ -344,16 +347,23 @@ impl<'a> Lexer<'a> {
         true
     }
 
-    fn string(&mut self) -> Result<Token> {
+    fn string(&mut self, triple: bool) -> Result<Token> {
         // Two-pass approach to avoid leaking outside the string when parsing interpolation.
         // 1) Capture the raw content between quotes without interpreting escapes.
         // 2) Parse that raw content into literal and expression parts; cook escapes only in literals.
         let tok_line = self.tok_line as u32;
         let outer_start = self.start;
-        // Record the byte index just AFTER the opening quote
+
+        // At start, self.cur is the first '"'. self.pos is just after it.
+        if triple {
+            self.advance(); // consume 2nd '"'
+            self.advance(); // consume 3rd '"'
+        }
+        // Record the byte index just AFTER the opening quote(s)
         let content_start = self.pos;
-        // Step into the first character (if any)
+        // Step into the first character of content (if any)
         self.advance();
+
         // scan raw until the matching closing quote (respecting escapes)
         let content_end = loop {
             let ch = match self.cur {
@@ -361,10 +371,18 @@ impl<'a> Lexer<'a> {
                 None => return Err(BasilError(format!("parse error at line {}: unterminated string", tok_line))),
             };
             if ch == '"' {
-                // end should EXCLUDE the closing quote
-                let end = self.pos - '"'.len_utf8();
-                self.advance();     // step past closing quote
-                break end;
+                if triple {
+                    if self.peek() == Some('"') && self.chars.clone().nth(1) == Some('"') {
+                        let end = self.pos - '"'.len_utf8();
+                        self.advance(); self.advance(); self.advance();
+                        break end;
+                    }
+                } else {
+                    // end should EXCLUDE the closing quote
+                    let end = self.pos - '"'.len_utf8();
+                    self.advance();     // step past closing quote
+                    break end;
+                }
             }
             if ch == '\\' {
                 // skip escaped char
@@ -789,5 +807,5 @@ impl<'a> Lexer<'a> {
     }
 }
 
-fn is_ident_start(c: char) -> bool { c.is_ascii_alphabetic() || c == '_' }
-fn is_ident_continue(c: char) -> bool { c.is_ascii_alphanumeric() || c == '_' || c == '$' || c == '%' || c == '@' || c == '&' }
+fn is_ident_start(c: char) -> bool { c.is_alphabetic() || c == '_' }
+fn is_ident_continue(c: char) -> bool { c.is_alphanumeric() || c == '_' || c == '$' || c == '%' || c == '@' || c == '&' }

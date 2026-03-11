@@ -1925,6 +1925,8 @@ impl C {
                         "NOW$"  => Some(146u8),
                         "EXPLODE" => Some(147u8),
                         "IMPLODE$" => Some(148u8),
+                        "RENDER$" => Some(157u8),
+                        "RENDER" => Some(157u8),
                         "SPLIT$" => Some(156u8),
                         "SPLIT" => Some(156u8),
                         "STRING$" => Some(26u8),

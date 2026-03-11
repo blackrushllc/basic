@@ -381,6 +381,9 @@ pub fn serialize_program(p: &Program) -> Vec<u8> {
         for v in &c.consts { ser_value(b, v); }
     }
     let mut b = Vec::new();
+    w_str(&mut b, "BSL");
+    w_u32(&mut b, 1);    // version
+    w_u32(&mut b, 0);    // flags
     ser_chunk(&mut b, &p.chunk);
     w_u32(&mut b, p.globals.len() as u32);
     for g in &p.globals { w_str(&mut b, g); }
@@ -423,6 +426,12 @@ pub fn deserialize_program(data: &[u8]) -> basil_common::Result<Program> {
         })
     }
     let mut p = 0usize;
+    // Header
+    let magic = r_str(&mut p, data)?;
+    if magic != "BSL" { return Err(BasilError("not a Basil bytecode file".into())); }
+    let _version = r_u32(&mut p, data)?;
+    let _flags = r_u32(&mut p, data)?;
+
     let chunk = de_chunk(&mut p, data)?;
     let n = r_u32(&mut p,data)? as usize; let mut globals = Vec::with_capacity(n);
     for _ in 0..n { globals.push(r_str(&mut p,data)?); }
