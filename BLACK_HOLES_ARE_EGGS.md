@@ -231,8 +231,7 @@ $$
 Then define the global, time-integrated fertility index by
 
 $$
-F_{\mathrm{tot}}(t_0)
-=
+F_{\mathrm{tot}}(t_0) =
 \int_0^{t_0} dt
 \int dM\, d^3x\,
 \dot n_{\mathrm{BH}}(M,x,t)\,
