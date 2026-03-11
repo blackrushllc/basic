@@ -2,9 +2,9 @@
 
 ## A speculative reproductive cosmology hypothesis with dark-sector gestation,
 
-merged from a prior draft and an attached supplementary brief
+merged with a prior draft and an attached supplementary brief
 
-**Prepared for Erik Olson**  
+**Erik Olson**  
 **March 10, 2026**
 
 **Status:** journal-style speculative manuscript grounded in standard GR/ΛCDM where established, with conjectural
