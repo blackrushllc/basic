@@ -68,8 +68,8 @@ present paper.
 | Element from attached brief                                                                | Merged treatment in this manuscript                                                                                                       | Divergence / caution                                                                                                                                                               |
 |--------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Popławski-style torsion bounce inside black holes                                          | Retained as one concrete interior mechanism alongside more agnostic bounce / pinch-off / white-hole transition possibilities.             | Not adopted as the unique mechanism; it remains a candidate among several speculative quantum-gravity completions.                                                                 |
-| Dark matter as gestational “yolk” or nutrient mass                                         | Generalized into a scaffold component $ \rho_{\mathrm{sc}} $ that still behaves approximately as clustering pressureless matter.        | Literal nutrient language is metaphorical. The physical requirement is only that the component remain observationally close to cold dark matter.                                   |
-| Dark energy as a consciousness / organizing intelligence                                   | Represented mathematically by a scalar-field order parameter $ \phi $ with $ w \approx -1 $ in the ΛCDM limit.                        | The consciousness reading is explicitly interpretive, not empirically established. The safer physics statement is “effective order field.”                                         |
+| Dark matter as gestational “yolk” or nutrient mass                                         | Generalized into a scaffold component $\rho_{\mathrm{sc}}$ that still behaves approximately as clustering pressureless matter.        | Literal nutrient language is metaphorical. The physical requirement is only that the component remain observationally close to cold dark matter.                                   |
+| Dark energy as a consciousness / organizing intelligence                                   | Represented mathematically by a scalar-field order parameter $\phi$ with $w \approx -1$ in the ΛCDM limit.                        | The consciousness reading is explicitly interpretive, not empirically established. The safer physics statement is “effective order field.”                                         |
 | Cosmic Fertility Index $F$                                                               | Merged with a local fecundity functional into a single hierarchical reproductive measure $F_{\mathrm{tot}}$.                            | The weighting function is phenomenological and not derived from a completed theory of quantum gravity.                                                                             |
 | Black-hole information paradox resolved by transfer of the genome to the daughter universe | Recast as a conjectural inheritance channel via horizon information capacity.                                                             | This is not a solved paradox in accepted physics; it is a proposed route, not a demonstrated resolution.                                                                           |
 | Current acceleration parameter quoted as $w_0 = -1.03 \pm 0.03$                          | Softened to “$w$ is observationally consistent with $-1$ to current precision, with some combined analyses exploring mild evolution.” | The stronger numerical statement is dataset- and model-dependent; Planck base ΛCDM itself assumes $w=-1$ [1], while later combined analyses test departures from that value [5]. |
@@ -174,13 +174,13 @@ $$
 \left(\frac{\dot a}{a}\right)^2 = \frac{8\pi G}{3}\rho - \frac{k c^2}{a^2} + \frac{\Lambda c^2}{3}.
 $$
 
-Here $ \rho $ may be decomposed as
+Here $\rho$ may be decomposed as
 
 $$
 \rho = \rho_b + \rho_r + \rho_{\mathrm{dm}} + \rho_{\mathrm{sc}},
 $$
 
-where $ \rho_{\mathrm{sc}} $ is a scaffold component introduced for the present hypothesis. The merged paper remains
+where $\rho_{\mathrm{sc}}$ is a scaffold component introduced for the present hypothesis. The merged paper remains
 agnostic as to whether the true mechanism is torsion-induced bounce, quantum pinch-off, white-hole transition, or some
 more general topology-changing event.
 
@@ -193,7 +193,7 @@ $$
 \nabla^2 \Phi = 4\pi G \left(\rho_b + \rho_{\mathrm{cdm}} + \rho_{\mathrm{sc}}\right).
 $$
 
-For dark energy we introduce a scalar order field $ \phi $, mathematically identical to a standard quintessence-like
+For dark energy we introduce a scalar order field $\phi$, mathematically identical to a standard quintessence-like
 representation:
 
 $$
@@ -208,7 +208,7 @@ $$
 w_\phi = \frac{p_\phi}{\rho_\phi}.
 $$
 
-When $ \dot\phi^2 \ll V(\phi) $, one has $ w_\phi \approx -1 $, recovering the ΛCDM limit. The
+When $\dot\phi^2 \ll V(\phi)$, one has $w_\phi \approx -1$, recovering the ΛCDM limit. The
 consciousness-language of the brief is then recast as an interpretive layer on top of an otherwise standard effective
 field description.
 
@@ -276,11 +276,11 @@ does not require a detailed interior theory.
 
 ### Proposition 3 (ΛCDM limit)
 
-The merged egg hypothesis contains standard ΛCDM as an observational limit when $ \rho_{\mathrm{sc}} $ is dynamically
-indistinguishable from cold dark matter and $ \phi $ behaves as a slowly varying or effectively constant vacuum-energy
+The merged egg hypothesis contains standard ΛCDM as an observational limit when $\rho_{\mathrm{sc}}$ is dynamically
+indistinguishable from cold dark matter and $\phi$ behaves as a slowly varying or effectively constant vacuum-energy
 field.
 
-**Proof sketch.** Set $ \rho_{\mathrm{sc}} \to 0 $ or absorb it into cold dark matter, and let $ \dot\phi^2 / V(\phi) \to 0 $. The background equations then reduce to the ordinary flat ΛCDM form used in current cosmology.
+**Proof sketch.** Set $\rho_{\mathrm{sc}} \to 0$ or absorb it into cold dark matter, and let $\dot\phi^2 / V(\phi) \to 0$. The background equations then reduce to the ordinary flat ΛCDM form used in current cosmology.
 
 ### Corollary 1 (Best egg candidates)
 
@@ -288,7 +288,7 @@ If the merged fertility functional is approximately correct, the most reproducti
 to be old, massive, cold black holes embedded in dense dark-sector environments.
 
 **Proof sketch.** This follows directly from Proposition 2 together with the scaffold-density and order-field factors
-in $ \mathcal{F}_i $.
+in $\mathcal{F}_i$.
 
 ---
 
