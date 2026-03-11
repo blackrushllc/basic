@@ -394,7 +394,7 @@ physics, dark-sector environments, and cosmic expansion history.
 # References
 
 [B0] *Black Holes as Cosmic Eggs: A Hypothesis for Reproductive Cosmology in a Living Universe.* Uploaded
-markdown brief provided by the Erik Olson, 2026.
+markdown brief provided by Erik Olson / BlackrushLLC from an X post 2026.
 
 [1] Planck Collaboration; N. Aghanim et al. *Planck 2018 results. VI. Cosmological parameters.* Astronomy & Astrophysics
 641, A6 (2020).
