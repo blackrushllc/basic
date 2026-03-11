@@ -47,7 +47,7 @@ and Kerr black holes [4]. The microscopic natures of dark matter and dark energy
 ignorance leaves conceptual room for constrained speculation, provided that any new interpretation reduces to the
 observed background expansion, large-scale structure, and compact-object phenomenology in the appropriate limit.
 
-The attached Grok brief contributes three major elements to the present synthesis: (i) a more explicit yolk or nutrient
+The attached original brief contributes three major elements to the present synthesis: (i) a more explicit yolk or nutrient
 metaphor for dark matter; (ii) a specific Popławski-style Einstein–Cartan torsion bounce as a candidate interior
 mechanism for daughter-universe birth; and (iii) a time-integrated “Cosmic Fertility Index” that weights black-hole
 production against dark-sector conditions [B0]. Those elements are incorporated here, but only after being separated
@@ -380,7 +380,7 @@ an empirically favored one.
 
 # 9. Conclusion
 
-By combining the earlier draft with the attached Grok brief, we obtain a sharper and more explicit version of the
+By combining the earlier draft with the attached original brief, we obtain a sharper and more explicit version of the
 black-holes-as-eggs idea. The merged manuscript preserves the useful elements of the brief—Popławski-style torsion
 bounce, the Cosmic Fertility Index, and a concrete experimental program—while clearly marking its stronger claims as
 conjectural rather than established. The result is a disciplined speculative cosmology in which the universe functions
@@ -393,8 +393,8 @@ physics, dark-sector environments, and cosmic expansion history.
 
 # References
 
-[B0] Grok 4.2 Beta. *Black Holes as Cosmic Eggs: A Hypothesis for Reproductive Cosmology in a Living Universe.* Uploaded
-markdown brief provided by the user, 2026.
+[B0] *Black Holes as Cosmic Eggs: A Hypothesis for Reproductive Cosmology in a Living Universe.* Uploaded
+markdown brief provided by the Erik Olson, 2026.
 
 [1] Planck Collaboration; N. Aghanim et al. *Planck 2018 results. VI. Cosmological parameters.* Astronomy & Astrophysics
 641, A6 (2020).
@@ -435,11 +435,11 @@ Black Holes.* arXiv:2405.12277 (2024).
 The following entries are provided in BibTeX form for reuse.
 
 ```
-@misc{GrokEggBrief2026,
-author       = {{Grok 4.2 Beta}},
+@misc{XEggBrief2026,
+author       = {{Erik Olson}},
 title        = {Black Holes as Cosmic Eggs: A Hypothesis for Reproductive Cosmology in a Living Universe},
 year         = {2026},
-note         = {Uploaded markdown brief provided by the user; incorporated into the present synthesis}
+note         = {Uploaded markdown brief provided by Erik Olson; incorporated into the present synthesis}
 }
 
 @article{Planck2020CosmologicalParameters,
